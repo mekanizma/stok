@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "start": "serve -s dist -l tcp://0.0.0.0:$PORT",
     "preview": "vite preview",
     "db:setup": "node scripts/apply-schema.mjs"
   },
@@ -18,6 +19,7 @@
     "lucide-react": "^1.28.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "serve": "^14.2.4",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
