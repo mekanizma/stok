@@ -59,6 +59,11 @@ export function notifyCriticalStock(action: 'scan' | 'force' | 'test' | 'status'
 
 export async function invokeStockAlert(action: 'scan' | 'force' | 'test' | 'status') {
   const { data, error } = await supabase.functions.invoke('stock-alert', { body: { action } });
+
+  if (data && typeof data === 'object' && 'error' in data && (data as { error?: unknown }).error) {
+    throw new Error(String((data as { error: unknown }).error));
+  }
+
   if (error) {
     const msg = error.message || String(error);
     if (/failed to send a request to the edge function/i.test(msg) || /not found/i.test(msg)) {
@@ -66,8 +71,28 @@ export async function invokeStockAlert(action: 'scan' | 'force' | 'test' | 'stat
         'stock-alert Edge Function bulunamadı. Supabase’de fonksiyonu deploy edin ve RESEND_API_KEY secret ekleyin.',
       );
     }
+
+    // Surface Edge Function JSON body (e.g. missing RESEND_API_KEY)
+    const ctx = (error as { context?: Response }).context;
+    if (ctx && typeof ctx.json === 'function') {
+      try {
+        const body = await ctx.json();
+        if (body?.error) throw new Error(String(body.error));
+        if (typeof body?.message === 'string') throw new Error(body.message);
+      } catch (inner) {
+        if (inner instanceof Error && inner.message && !/non-2xx/i.test(inner.message)) {
+          throw inner;
+        }
+      }
+    }
+
+    if (/non-2xx/i.test(msg)) {
+      throw new Error(
+        'Edge Function hata döndü. Çoğunlukla: RESEND_API_KEY secret eksik, alıcı e-posta boş veya Resend From adresi geçersiz.',
+      );
+    }
     throw error;
   }
-  if (data?.error) throw new Error(String(data.error));
-  return data as Record<string, unknown>;
+
+  return (data || {}) as Record<string, unknown>;
 }
