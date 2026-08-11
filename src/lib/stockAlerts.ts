@@ -52,47 +52,46 @@ export async function saveStockAlertSettings(settings: StockAlertSettings) {
 
 /** Fire-and-forget critical stock scan after inventory changes. */
 export function notifyCriticalStock(action: 'scan' | 'force' | 'test' | 'status' = 'scan') {
-  void supabase.functions.invoke('stock-alert', { body: { action } }).catch(() => {
+  void invokeStockAlert(action).catch(() => {
     /* non-blocking */
   });
 }
 
 export async function invokeStockAlert(action: 'scan' | 'force' | 'test' | 'status') {
-  const { data, error } = await supabase.functions.invoke('stock-alert', { body: { action } });
-
-  if (data && typeof data === 'object' && 'error' in data && (data as { error?: unknown }).error) {
-    throw new Error(String((data as { error: unknown }).error));
+  const { data: sessionData } = await supabase.auth.getSession();
+  const session = sessionData.session;
+  if (!session?.access_token) {
+    throw new Error('Oturum bulunamadı. Tekrar giriş yapın.');
   }
 
-  if (error) {
-    const msg = error.message || String(error);
-    if (/failed to send a request to the edge function/i.test(msg) || /not found/i.test(msg)) {
-      throw new Error(
-        'stock-alert Edge Function bulunamadı. Supabase’de fonksiyonu deploy edin ve RESEND_API_KEY secret ekleyin.',
-      );
-    }
-
-    // Surface Edge Function JSON body (e.g. missing RESEND_API_KEY)
-    const ctx = (error as { context?: Response }).context;
-    if (ctx && typeof ctx.json === 'function') {
-      try {
-        const body = await ctx.json();
-        if (body?.error) throw new Error(String(body.error));
-        if (typeof body?.message === 'string') throw new Error(body.message);
-      } catch (inner) {
-        if (inner instanceof Error && inner.message && !/non-2xx/i.test(inner.message)) {
-          throw inner;
-        }
-      }
-    }
-
-    if (/non-2xx/i.test(msg)) {
-      throw new Error(
-        'Edge Function hata döndü. Çoğunlukla: RESEND_API_KEY secret eksik, alıcı e-posta boş veya Resend From adresi geçersiz.',
-      );
-    }
-    throw error;
+  const baseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/$/, '');
+  const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim();
+  if (!baseUrl || !anonKey) {
+    throw new Error('Supabase yapılandırması eksik.');
   }
 
-  return (data || {}) as Record<string, unknown>;
+  const res = await fetch(`${baseUrl}/functions/v1/stock-alert`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: anonKey,
+    },
+    body: JSON.stringify({ action }),
+  });
+
+  const text = await res.text();
+  let payload: Record<string, unknown> = {};
+  try {
+    payload = text ? JSON.parse(text) as Record<string, unknown> : {};
+  } catch {
+    payload = { raw: text };
+  }
+
+  if (!res.ok) {
+    const detail = String(payload.error || payload.message || payload.raw || text || res.statusText || res.status);
+    throw new Error(detail);
+  }
+  if (payload.error) throw new Error(String(payload.error));
+  return payload;
 }

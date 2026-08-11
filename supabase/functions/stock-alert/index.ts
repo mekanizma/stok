@@ -91,7 +91,8 @@ async function sendResend(opts: {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(body?.message || `Resend error ${res.status}`);
+    const detail = body?.message || body?.error || JSON.stringify(body) || `Resend error ${res.status}`;
+    throw new Error(String(detail));
   }
   return body;
 }
@@ -102,18 +103,26 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || Deno.env.get('SUPABASE_PUBLISHABLE_KEY') || '';
     const resendKey = Deno.env.get('RESEND_API_KEY') || '';
 
+    if (!supabaseUrl || !serviceKey || !anonKey) {
+      return json({ error: 'Supabase ortam değişkenleri eksik (URL / ANON / SERVICE_ROLE).' }, 500);
+    }
+
     const authHeader = req.headers.get('Authorization') || '';
+    if (!authHeader.toLowerCase().startsWith('bearer ')) {
+      return json({ error: 'Authorization header gerekli.' }, 401);
+    }
+
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
     const { data: userData, error: userErr } = await userClient.auth.getUser();
     if (userErr || !userData.user) {
-      return json({ error: 'Unauthorized' }, 401);
+      return json({ error: `Unauthorized: ${userErr?.message || 'oturum geçersiz'}` }, 401);
     }
 
     const admin = createClient(supabaseUrl, serviceKey);
