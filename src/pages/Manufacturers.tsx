@@ -103,7 +103,7 @@ export default function ManufacturersPage({ manufacturers, assets, onRefresh }: 
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
         title={t('deleteManufacturer')}
-        message={`"${deleteTarget?.name}" ${t('deleteConfirm')}`}
+        message={t('deleteConfirm', { name: deleteTarget?.name || '' })}
       />
     </div>
   );
@@ -135,9 +135,9 @@ function ManufacturerForm({ manufacturer, onClose, onSave, saving }: {
       }
     >
       <div className="space-y-4">
-        <Input label={`${t('name')} *`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Dell" required />
-        <Input label={t('website')} value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://..." />
-        <Input label={t('supportUrl')} value={form.support_url} onChange={(e) => setForm({ ...form, support_url: e.target.value })} placeholder="https://..." />
+        <Input label={`${t('name')} *`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t('placeholderManufacturerName')} required />
+        <Input label={t('website')} value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder={t('exampleUrl')} />
+        <Input label={t('supportUrl')} value={form.support_url} onChange={(e) => setForm({ ...form, support_url: e.target.value })} placeholder={t('exampleUrl')} />
       </div>
     </Modal>
   );

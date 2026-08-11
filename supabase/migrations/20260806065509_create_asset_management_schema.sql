@@ -9,7 +9,7 @@
 - `manufacturers` — makers of assets (e.g. Dell, Apple, HP). Columns: id, name, url, support_url, created_at.
 - `locations` — physical locations where assets can reside. Columns: id, name, address, city, country, created_at.
 - `users` — people who can be assigned assets (internal staff, not auth users). Columns: id, first_name, last_name, email, phone, job_title, employee_num, location_id, created_at.
-- `assets` — the core inventory items. Columns: id, asset_tag, name, serial, model, manufacturer_id, category_id, default_location_id, assigned_to_id, status (ready/deployed/pending/broken/lost), purchase_date, purchase_cost, order_number, supplier, warranty_months, notes, image_url, created_at, updated_at.
+- `assets` — the core inventory items. Columns: id, asset_tag, name, serial, model, manufacturer_id, category_id, default_location_id, assigned_to_id, status (ready/deployed), purchase_date, purchase_cost, order_number, supplier, warranty_months, notes, image_url, created_at, updated_at.
 - `accessories` — non-asset items that can be checked out (keyboards, mice, headsets). Columns: id, name, manufacturer_id, category_id, qty, remaining_qty, created_at.
 - `consumables` — consumable items (toner, cables, batteries). Columns: id, name, manufacturer_id, category_id, qty, remaining_qty, created_at.
 - `licenses` — software licenses. Columns: id, name, serial, manufacturer_id, category_id, seats, remaining_seats, expiration_date, purchase_cost, created_at.
@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS assets (
   category_id uuid REFERENCES categories(id) ON DELETE SET NULL,
   default_location_id uuid REFERENCES locations(id) ON DELETE SET NULL,
   assigned_to_id uuid REFERENCES users(id) ON DELETE SET NULL,
-  status text NOT NULL DEFAULT 'ready' CHECK (status IN ('ready','deployed','pending','broken','lost')),
+  status text NOT NULL DEFAULT 'ready' CHECK (status IN ('ready','deployed')),
   purchase_date date,
   purchase_cost numeric(12,2),
   order_number text,
@@ -242,6 +242,13 @@ DROP TRIGGER IF EXISTS assets_updated_at ON assets;
 CREATE TRIGGER assets_updated_at BEFORE UPDATE ON assets
 FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
+-- Grants for PostgREST (anon / authenticated)
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated;
+
 -- Seed data
 INSERT INTO categories (name, type, color) VALUES
   ('Laptops', 'asset', 'blue'),
@@ -274,12 +281,4 @@ INSERT INTO locations (name, city, country) VALUES
   ('Branch Office - Ankara', 'Ankara', 'Turkey'),
   ('Data Center', 'Izmir', 'Turkey'),
   ('Warehouse', 'Istanbul', 'Turkey')
-ON CONFLICT DO NOTHING;
-
-INSERT INTO users (first_name, last_name, email, job_title, employee_num) VALUES
-  ('Ahmet', 'Yilmaz', 'ahmet.yilmaz@company.com', 'IT Manager', 'EMP-001'),
-  ('Ayse', 'Kaya', 'ayse.kaya@company.com', 'Software Developer', 'EMP-002'),
-  ('Mehmet', 'Demir', 'mehmet.demir@company.com', 'System Administrator', 'EMP-003'),
-  ('Fatma', 'Celik', 'fatma.celik@company.com', 'Network Engineer', 'EMP-004'),
-  ('Can', 'Ozturk', 'can.ozturk@company.com', 'DevOps Engineer', 'EMP-005')
 ON CONFLICT DO NOTHING;

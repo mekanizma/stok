@@ -12,7 +12,7 @@ interface Props {
 }
 
 export default function LocationsPage({ locations, assets, users, onRefresh }: Props) {
-  const { t } = useI18n();
+  const { t, tn } = useI18n();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Location | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Location | null>(null);
@@ -70,9 +70,9 @@ export default function LocationsPage({ locations, assets, users, onRefresh }: P
                   </button>
                 </div>
               </div>
-              <h3 className="text-base font-semibold text-gray-900 mb-1">{l.name}</h3>
+              <h3 className="text-base font-semibold text-gray-900 mb-1">{tn(l.name)}</h3>
               <p className="text-sm text-gray-500 mb-3">
-                {[l.address, l.city, l.country].filter(Boolean).join(', ') || t('none')}
+                {[l.address, l.city, tn(l.country)].filter(Boolean).join(', ') || t('none')}
               </p>
               <div className="flex gap-4 pt-3 border-t border-gray-100">
                 <div className="flex items-center gap-1.5 text-xs text-gray-500">
@@ -96,7 +96,7 @@ export default function LocationsPage({ locations, assets, users, onRefresh }: P
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
         title={t('deleteLocation')}
-        message={`"${deleteTarget?.name}" ${t('deleteConfirm')}`}
+        message={t('deleteConfirm', { name: tn(deleteTarget?.name) })}
       />
     </div>
   );
@@ -129,7 +129,7 @@ function LocationForm({ location, onClose, onSave, saving }: {
       }
     >
       <div className="space-y-4">
-        <Input label={`${t('name')} *`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Main Office" required />
+        <Input label={`${t('name')} *`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t('placeholderLocationName')} required />
         <Input label={t('address')} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
         <div className="grid grid-cols-2 gap-4">
           <Input label={t('city')} value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />

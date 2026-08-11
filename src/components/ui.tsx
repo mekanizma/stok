@@ -7,14 +7,11 @@ import { useI18n, type TranslationKey } from '@/lib/i18n';
 const STATUS_CONFIG: Record<AssetStatus, { bg: string; text: string; dot: string; key: TranslationKey }> = {
   ready: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', key: 'ready' },
   deployed: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500', key: 'deployed' },
-  pending: { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500', key: 'pending' },
-  broken: { bg: 'bg-red-50', text: 'text-red-700', dot: 'bg-red-500', key: 'broken' },
-  lost: { bg: 'bg-gray-100', text: 'text-gray-600', dot: 'bg-gray-400', key: 'lost' },
 };
 
 export function StatusBadge({ status }: { status: AssetStatus }) {
   const { t } = useI18n();
-  const cfg = STATUS_CONFIG[status];
+  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.ready;
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${cfg.bg} ${cfg.text}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
@@ -23,7 +20,7 @@ export function StatusBadge({ status }: { status: AssetStatus }) {
   );
 }
 
-export const STATUS_OPTIONS: AssetStatus[] = ['ready', 'deployed', 'pending', 'broken', 'lost'];
+export const STATUS_OPTIONS: AssetStatus[] = ['ready', 'deployed'];
 
 // ---- Button ----
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -77,7 +74,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: M
           </button>
         </div>
         <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-4">{children}</div>
-        {footer && <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">{footer}</div>}
+        {footer && <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl w-full">{footer}</div>}
       </div>
     </div>
   );
@@ -141,14 +138,24 @@ export function EmptyState({ icon: Icon, title, description, action }: { icon: t
 }
 
 // ---- Confirm Dialog ----
-export function ConfirmDialog({ open, onClose, onConfirm, title, message }: { open: boolean; onClose: () => void; onConfirm: () => void; title: string; message: string }) {
+export function ConfirmDialog({
+  open, onClose, onConfirm, title, message, confirmLabel, confirmVariant = 'danger',
+}: {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  confirmVariant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'outline';
+}) {
   const { t } = useI18n();
   return (
     <Modal open={open} onClose={onClose} title={title} size="sm"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>{t('cancel')}</Button>
-          <Button variant="danger" onClick={() => { onConfirm(); onClose(); }}>{t('delete')}</Button>
+          <Button variant={confirmVariant} onClick={() => { onConfirm(); onClose(); }}>{confirmLabel || t('delete')}</Button>
         </>
       }
     >
@@ -179,6 +186,77 @@ export function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md'
   return (
     <div className={`flex items-center justify-center rounded-full text-white font-semibold shrink-0 ${sizes[size]} ${colors[colorIndex]}`}>
       {initials || '?'}
+    </div>
+  );
+}
+
+// ---- Table Pagination ----
+export const PAGE_SIZE_OPTIONS = [20, 40, 60, 100] as const;
+export type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
+
+export function TablePagination({
+  page,
+  pageSize,
+  total,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (size: PageSize) => void;
+}) {
+  const { t } = useI18n();
+  if (total <= 0) return null;
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const current = Math.min(Math.max(1, page), totalPages);
+  const from = (current - 1) * pageSize + 1;
+  const to = Math.min(current * pageSize, total);
+
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-3 py-3 border-t border-gray-200 bg-gray-50/80">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
+        <label className="inline-flex items-center gap-2">
+          <span className="whitespace-nowrap">{t('rowsPerPage')}</span>
+          <select
+            value={pageSize}
+            onChange={(e) => onPageSizeChange(Number(e.target.value) as PageSize)}
+            className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+          >
+            {PAGE_SIZE_OPTIONS.map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+        </label>
+        <span className="text-xs sm:text-sm text-gray-500">
+          {t('paginationRange', { from, to, total })}
+        </span>
+      </div>
+      <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={current <= 1}
+          onClick={() => onPageChange(current - 1)}
+        >
+          {t('prevPage')}
+        </Button>
+        <span className="text-xs sm:text-sm font-medium text-gray-700 tabular-nums px-1">
+          {t('pageOf', { page: current, pages: totalPages })}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={current >= totalPages}
+          onClick={() => onPageChange(current + 1)}
+        >
+          {t('nextPage')}
+        </Button>
+      </div>
     </div>
   );
 }

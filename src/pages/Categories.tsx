@@ -17,7 +17,7 @@ const TYPE_ICONS: Record<string, typeof Tags> = {
 const COLORS = ['blue', 'cyan', 'emerald', 'amber', 'rose', 'violet', 'teal', 'orange', 'pink', 'slate', 'red', 'indigo'];
 
 export default function CategoriesPage({ categories, assets, onRefresh }: Props) {
-  const { t } = useI18n();
+  const { t, tn } = useI18n();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Category | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Category | null>(null);
@@ -76,7 +76,7 @@ export default function CategoriesPage({ categories, assets, onRefresh }: Props)
                     </button>
                   </div>
                 </div>
-                <h3 className="text-sm font-semibold text-gray-900">{c.name}</h3>
+                <h3 className="text-sm font-semibold text-gray-900">{tn(c.name)}</h3>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="text-xs text-gray-500 capitalize">{t(c.type as TranslationKey)}</span>
                   {c.type === 'asset' && <span className="text-xs text-gray-400">· {getCount(c.id)} {t('assets')}</span>}
@@ -96,7 +96,7 @@ export default function CategoriesPage({ categories, assets, onRefresh }: Props)
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
         title={t('deleteCategory')}
-        message={`"${deleteTarget?.name}" ${t('deleteConfirm')}`}
+        message={t('deleteConfirm', { name: tn(deleteTarget?.name) })}
       />
     </div>
   );
@@ -128,12 +128,12 @@ function CategoryForm({ category, onClose, onSave, saving }: {
       }
     >
       <div className="space-y-4">
-        <Input label={`${t('name')} *`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Laptops" required />
+        <Input label={`${t('name')} *`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t('placeholderCategoryName')} required />
         <Select label={t('type')} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as Category['type'] })}>
-          <option value="asset">{t('assets')}</option>
-          <option value="accessory">{t('accessories')}</option>
-          <option value="consumable">{t('consumables')}</option>
-          <option value="license">{t('licenses')}</option>
+          <option value="asset">{t('asset')}</option>
+          <option value="accessory">{t('accessory')}</option>
+          <option value="consumable">{t('consumable')}</option>
+          <option value="license">{t('license')}</option>
         </Select>
         <div>
           <label className="block mb-1.5 text-sm font-medium text-gray-700">{t('color')}</label>

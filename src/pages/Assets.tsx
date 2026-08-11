@@ -5,6 +5,8 @@ import { Plus, Search, Boxes, ArrowRightLeft, Trash2, Edit3, Filter, ChevronDown
 import { type Page } from '@/App';
 import { StatusBadge, STATUS_OPTIONS, Button, Modal, Input, Select, Textarea, PageHeader, EmptyState, ConfirmDialog, Avatar } from '@/components/ui';
 import { useI18n, type TranslationKey } from '@/lib/i18n';
+import { getAssetDisplayName } from '@/lib/assetAssignee';
+import { insertCheckoutHistory } from '@/lib/checkoutHistory';
 
 interface Props {
   assets: Asset[];
@@ -19,7 +21,7 @@ interface Props {
 }
 
 export default function AssetsPage({ assets, loading, categories, manufacturers, locations, users, onRefresh, navigate, globalSearch }: Props) {
-  const { t } = useI18n();
+  const { t, tn } = useI18n();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<AssetStatus | 'all'>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -92,7 +94,7 @@ export default function AssetsPage({ assets, loading, categories, manufacturers,
       assigned_to_id: checkoutUser,
       status: 'deployed',
     }).eq('id', checkoutTarget.id);
-    await supabase.from('checkout_history').insert({
+    await insertCheckoutHistory({
       asset_id: checkoutTarget.id,
       assigned_to_id: checkoutUser,
       action: 'checkout',
@@ -104,7 +106,7 @@ export default function AssetsPage({ assets, loading, categories, manufacturers,
   };
 
   const handleCheckin = async (asset: Asset) => {
-    await supabase.from('checkout_history').insert({
+    await insertCheckoutHistory({
       asset_id: asset.id,
       assigned_to_id: asset.assigned_to_id,
       action: 'checkin',
@@ -168,7 +170,7 @@ export default function AssetsPage({ assets, loading, categories, manufacturers,
           </Select>
           <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="flex-1">
             <option value="all">{t('allCategories')}</option>
-            {categories.filter((c) => c.type === 'asset').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {categories.filter((c) => c.type === 'asset').map((c) => <option key={c.id} value={c.id}>{tn(c.name)}</option>)}
           </Select>
         </div>
       )}
@@ -204,7 +206,7 @@ export default function AssetsPage({ assets, loading, categories, manufacturers,
                           <Boxes className="w-4 h-4" />
                         </div>
                         <div className="min-w-0">
-                          <p className="text-sm font-medium text-gray-900 group-hover:text-brand-600 transition-colors truncate">{a.name}</p>
+                          <p className="text-sm font-medium text-gray-900 group-hover:text-brand-600 transition-colors truncate">{getAssetDisplayName(a)}</p>
                           <p className="text-xs text-gray-500 truncate">{a.model || a.serial || '—'}</p>
                         </div>
                       </button>
@@ -215,7 +217,7 @@ export default function AssetsPage({ assets, loading, categories, manufacturers,
                       </span>
                     </td>
                     <td className="px-4 py-3 hidden lg:table-cell">
-                      <span className="text-sm text-gray-600">{a.category?.name || '—'}</span>
+                      <span className="text-sm text-gray-600">{tn(a.category?.name) || '—'}</span>
                     </td>
                     <td className="px-4 py-3 hidden lg:table-cell">
                       {a.assigned_to ? (
@@ -285,7 +287,7 @@ export default function AssetsPage({ assets, loading, categories, manufacturers,
         <p className="text-sm text-gray-600 mb-3"><span className="font-medium text-gray-900">{checkoutTarget?.name}</span> {t('assignAssetTo')}</p>
         <Select label={t('assignTo')} value={checkoutUser} onChange={(e) => setCheckoutUser(e.target.value)}>
           <option value="">{t('selectUser')}</option>
-          {users.map((u) => <option key={u.id} value={u.id}>{u.first_name} {u.last_name} — {u.job_title || t('employee')}</option>)}
+          {users.map((u) => <option key={u.id} value={u.id}>{u.first_name} {u.last_name} — {tn(u.job_title) || t('employee')}</option>)}
         </Select>
       </Modal>
 
@@ -295,7 +297,7 @@ export default function AssetsPage({ assets, loading, categories, manufacturers,
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
         title={t('deleteAsset')}
-        message={`"${deleteTarget?.name}" ${t('deleteAssetMsgEnd')}`}
+        message={t('deleteAssetConfirm', { name: getAssetDisplayName(deleteTarget) })}
       />
     </div>
   );
@@ -311,7 +313,7 @@ function AssetForm({ asset, categories, manufacturers, locations, onClose, onSav
   onSave: (data: Record<string, string>) => void;
   saving: boolean;
 }) {
-  const { t } = useI18n();
+  const { t, tn } = useI18n();
   const [form, setForm] = useState({
     name: asset?.name || '',
     asset_tag: asset?.asset_tag || '',
@@ -347,13 +349,13 @@ function AssetForm({ asset, categories, manufacturers, locations, onClose, onSav
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input label={`${t('name')} *`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. MacBook Pro 16" required />
+          <Input label={`${t('name')} *`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t('placeholderAssetName')} required />
           {!asset && <Input label={t('assetTag')} value={form.asset_tag} onChange={(e) => setForm({ ...form, asset_tag: e.target.value })} placeholder={t('autoGenerated')} />}
           <Input label={t('serial')} value={form.serial} onChange={(e) => setForm({ ...form, serial: e.target.value })} />
           <Input label={t('model')} value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} />
           <Select label={t('category')} value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
             <option value="">{t('none')}</option>
-            {categories.filter((c) => c.type === 'asset').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {categories.filter((c) => c.type === 'asset').map((c) => <option key={c.id} value={c.id}>{tn(c.name)}</option>)}
           </Select>
           <Select label={t('manufacturer')} value={form.manufacturer_id} onChange={(e) => setForm({ ...form, manufacturer_id: e.target.value })}>
             <option value="">{t('none')}</option>
@@ -361,7 +363,7 @@ function AssetForm({ asset, categories, manufacturers, locations, onClose, onSav
           </Select>
           <Select label={t('defaultLocation')} value={form.default_location_id} onChange={(e) => setForm({ ...form, default_location_id: e.target.value })}>
             <option value="">{t('none')}</option>
-            {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            {locations.map((l) => <option key={l.id} value={l.id}>{tn(l.name)}</option>)}
           </Select>
           <Select label={t('status')} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as AssetStatus })}>
             {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{t(s as TranslationKey)}</option>)}

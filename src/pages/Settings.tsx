@@ -34,15 +34,7 @@ export default function SettingsPage() {
             </div>
             <div className="flex justify-between items-center py-2 border-b border-gray-100">
               <span className="text-sm text-gray-500">{t('database')}</span>
-              <span className="text-sm font-medium text-gray-900">Supabase (PostgreSQL)</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-gray-100">
-              <span className="text-sm text-gray-500">{t('environment')}</span>
-              <span className="text-sm font-medium text-emerald-600">{t('production')}</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-gray-100">
-              <span className="text-sm text-gray-500">{t('authentication')}</span>
-              <span className="text-sm font-medium text-gray-900">{t('singleTenant')}</span>
+              <span className="text-sm font-medium text-gray-900">{t('databaseSupabase')}</span>
             </div>
           </div>
         </div>

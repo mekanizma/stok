@@ -1,9 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
+import { type Session } from '@supabase/supabase-js';
 import { supabase, type Asset, type UserRecord, type Category, type Manufacturer, type Location, type Accessory, type Consumable, type License } from '@/lib/supabase';
 import { useI18n, type TranslationKey } from '@/lib/i18n';
-import { LayoutDashboard, Boxes, Users, MapPin, Tags, Building2, Settings, Package, KeyRound, PackageCheck, ScrollText, Search, Menu, X, Globe, ClipboardCheck } from 'lucide-react';
+import { LayoutDashboard, Users, MapPin, Tags, Building2, Settings, Package, KeyRound, PackageCheck, ScrollText, Menu, X, Globe, ClipboardCheck, ArchiveRestore, LogOut } from 'lucide-react';
+import { Button, Input, Modal } from '@/components/ui';
+import {
+  adminDisplayName,
+  adminInitials,
+  type AdminProfile,
+} from '@/lib/adminProfile';
 import Dashboard from '@/pages/Dashboard';
-import AssetsPage from '@/pages/Assets';
 import AssetDetail from '@/pages/AssetDetail';
 import UsersPage from '@/pages/Users';
 import LocationsPage from '@/pages/Locations';
@@ -15,11 +21,38 @@ import LicensesPage from '@/pages/Licenses';
 import ActivityPage from '@/pages/Activity';
 import SettingsPage from '@/pages/Settings';
 import DeployedAssetsPage from '@/pages/DeployedAssets';
+import CheckedInAssetsPage from '@/pages/CheckedInAssets';
+import LoginPage from '@/pages/Login';
+import ForcePasswordChange from '@/pages/ForcePasswordChange';
+import { getSessionRole, canAccessPage, defaultPageForRole, canEditDeployedAssets, canManageZimmet, type AppRole } from '@/lib/roles';
+import { insertCheckoutHistory } from '@/lib/checkoutHistory';
+
+function profileFromSession(session: Session | null): AdminProfile {
+  const user = session?.user;
+  const meta = (user?.user_metadata || {}) as Record<string, string | boolean>;
+  return {
+    firstName: (meta.first_name as string) || (meta.full_name as string)?.split(' ')[0] || 'Admin',
+    lastName: (meta.last_name as string) || '',
+    email: user?.email || 'admin@stoktakip.com',
+    password: '',
+  };
+}
+
+function mustChangePassword(session: Session | null) {
+  return session?.user?.user_metadata?.must_change_password === true;
+}
+
+function roleFromSession(session: Session | null): AppRole {
+  return getSessionRole(
+    session?.user?.user_metadata as Record<string, unknown> | undefined,
+    session?.user?.email,
+  );
+}
 
 export type Page =
   | { name: 'dashboard' }
-  | { name: 'assets' }
   | { name: 'deployed-assets' }
+  | { name: 'checked-in-assets' }
   | { name: 'asset-detail'; id: string }
   | { name: 'users' }
   | { name: 'locations' }
@@ -40,8 +73,8 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { labelKey: 'dashboard', icon: LayoutDashboard, page: 'dashboard', group: 'overview' },
-  { labelKey: 'assets', icon: Boxes, page: 'assets', group: 'inventory' },
   { labelKey: 'deployedAssets', icon: ClipboardCheck, page: 'deployed-assets', group: 'inventory' },
+  { labelKey: 'checkedInAssets', icon: ArchiveRestore, page: 'checked-in-assets', group: 'inventory' },
   { labelKey: 'accessories', icon: Package, page: 'accessories', group: 'inventory' },
   { labelKey: 'consumables', icon: PackageCheck, page: 'consumables', group: 'inventory' },
   { labelKey: 'licenses', icon: KeyRound, page: 'licenses', group: 'inventory' },
@@ -55,9 +88,24 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function App() {
   const { t, lang, setLang } = useI18n();
+  const [session, setSession] = useState<Session | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [page, setPage] = useState<Page>({ name: 'dashboard' });
+  const appRole = roleFromSession(session);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [globalSearch, setGlobalSearch] = useState('');
+  const [adminProfile, setAdminProfile] = useState<AdminProfile>(() => profileFromSession(null));
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileForm, setProfileForm] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [profileError, setProfileError] = useState('');
+  const [profileSuccess, setProfileSuccess] = useState('');
+  const [profileSaving, setProfileSaving] = useState(false);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -137,44 +185,202 @@ export default function App() {
   }, [fetchAssets, fetchUsers, fetchCategories, fetchManufacturers, fetchLocations, fetchAccessories, fetchConsumables, fetchLicenses]);
 
   useEffect(() => {
+    let mounted = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setSession(data.session);
+      setAdminProfile(profileFromSession(data.session));
+      if (data.session) {
+        setPage(defaultPageForRole(roleFromSession(data.session)));
+      }
+      setAuthReady(true);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
+      setSession(next);
+      setAdminProfile(profileFromSession(next));
+      setAuthReady(true);
+      if (event === 'SIGNED_IN' && next) {
+        setPage(defaultPageForRole(roleFromSession(next)));
+      }
+      if (event === 'SIGNED_OUT') {
+        setPage({ name: 'dashboard' });
+      }
+    });
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    if (!canAccessPage(appRole, page.name)) {
+      setPage(defaultPageForRole(appRole));
+    }
+  }, [session, appRole, page.name]);
+
+  useEffect(() => {
+    if (!session) {
+      setLoading(false);
+      return;
+    }
     (async () => {
       setLoading(true);
       await refreshAll();
       setLoading(false);
     })();
-  }, [refreshAll]);
+  }, [session, refreshAll]);
 
   const navigate = (p: Page) => {
+    if (!canAccessPage(appRole, p.name)) return;
     setPage(p);
     setSidebarOpen(false);
   };
 
+  const openProfile = () => {
+    const current = profileFromSession(session);
+    setAdminProfile(current);
+    setProfileForm({
+      firstName: current.firstName,
+      lastName: current.lastName,
+      email: current.email,
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: '',
+    });
+    setProfileError('');
+    setProfileSuccess('');
+    setProfileOpen(true);
+  };
+
+  const saveProfile = async () => {
+    setProfileError('');
+    setProfileSuccess('');
+    setProfileSaving(true);
+
+    const changingPassword = Boolean(profileForm.newPassword || profileForm.confirmPassword || profileForm.currentPassword);
+    if (changingPassword) {
+      if (profileForm.newPassword !== profileForm.confirmPassword) {
+        setProfileError(t('passwordMismatch'));
+        setProfileSaving(false);
+        return;
+      }
+      if (!profileForm.newPassword || !profileForm.currentPassword) {
+        setProfileError(t('wrongCurrentPassword'));
+        setProfileSaving(false);
+        return;
+      }
+      const { error: reauthError } = await supabase.auth.signInWithPassword({
+        email: session?.user.email || profileForm.email,
+        password: profileForm.currentPassword,
+      });
+      if (reauthError) {
+        setProfileError(t('wrongCurrentPassword'));
+        setProfileSaving(false);
+        return;
+      }
+      const { error: pwError } = await supabase.auth.updateUser({ password: profileForm.newPassword });
+      if (pwError) {
+        setProfileError(pwError.message);
+        setProfileSaving(false);
+        return;
+      }
+    }
+
+    const firstName = profileForm.firstName.trim() || 'Admin';
+    const lastName = profileForm.lastName.trim();
+    const email = profileForm.email.trim();
+
+    const { error: metaError } = await supabase.auth.updateUser({
+      email: email || undefined,
+      data: {
+        first_name: firstName,
+        last_name: lastName,
+        full_name: [firstName, lastName].filter(Boolean).join(' '),
+        role: 'admin',
+      },
+    });
+    if (metaError) {
+      setProfileError(metaError.message);
+      setProfileSaving(false);
+      return;
+    }
+
+    const { data } = await supabase.auth.getSession();
+    setSession(data.session);
+    setAdminProfile(profileFromSession(data.session));
+    setProfileForm((f) => ({ ...f, currentPassword: '', newPassword: '', confirmPassword: '' }));
+    setProfileSuccess(t('profileSaved'));
+    setProfileSaving(false);
+  };
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setProfileOpen(false);
+    setPage({ name: 'dashboard' });
+  };
+
   const handleCheckinFromList = async (asset: Asset) => {
-    if (!asset.assigned_to_id) return;
-    await supabase.from('checkout_history').insert({
+    const assigneeNote = asset.assignee_name
+      ? `${asset.assignee_name}${asset.assignee_email ? ` (${asset.assignee_email})` : ''}`
+      : null;
+    await insertCheckoutHistory({
       asset_id: asset.id,
       assigned_to_id: asset.assigned_to_id,
       action: 'checkin',
-      note: 'Checked in from deployed list',
+      note: assigneeNote ? `${t('checkedInFromDeployed')} — ${assigneeNote}` : t('checkedInFromDeployed'),
     });
-    await supabase.from('assets').update({ assigned_to_id: null, status: 'ready' }).eq('id', asset.id);
+    await supabase.from('assets').update({
+      assigned_to_id: null,
+      assignee_name: null,
+      assignee_email: null,
+      status: 'ready',
+    }).eq('id', asset.id);
     fetchAssets();
   };
 
   const groups = Array.from(new Set(NAV_ITEMS.map((i) => i.group)));
-  const activePage = page.name === 'asset-detail' ? 'assets' : page.name;
+  const visibleNav = NAV_ITEMS.filter((i) => canAccessPage(appRole, i.page));
+  const visibleGroups = groups.filter((g) => visibleNav.some((i) => i.group === g));
+  const activePage = page.name === 'asset-detail'
+    ? (assets.find((a) => a.id === (page as { id: string }).id)?.status === 'deployed' ? 'deployed-assets' : 'checked-in-assets')
+    : page.name;
   const currentLabelKey = NAV_ITEMS.find((i) => i.page === activePage)?.labelKey || 'dashboard';
 
   const renderPage = () => {
+    if (!canAccessPage(appRole, page.name)) {
+      return (
+        <div className="p-6 text-center text-sm text-gray-500">{t('accessDenied')}</div>
+      );
+    }
     switch (page.name) {
       case 'dashboard':
-        return <Dashboard assets={assets} users={users} locations={locations} categories={categories} accessories={accessories} consumables={consumables} licenses={licenses} navigate={navigate} />;
-      case 'assets':
-        return <AssetsPage assets={assets} loading={loading} categories={categories} manufacturers={manufacturers} locations={locations} users={users} onRefresh={fetchAssets} navigate={navigate} globalSearch={globalSearch} />;
+        return <Dashboard assets={assets} users={users} locations={locations} categories={categories} accessories={accessories} consumables={consumables} licenses={licenses} navigate={navigate} appRole={appRole} />;
       case 'deployed-assets':
-        return <DeployedAssetsPage assets={assets} users={users} loading={loading} navigate={navigate} onCheckin={handleCheckinFromList} />;
+        return (
+          <DeployedAssetsPage
+            assets={assets}
+            categories={categories}
+            manufacturers={manufacturers}
+            locations={locations}
+            loading={loading}
+            canEdit={canEditDeployedAssets(appRole)}
+            canManage={canManageZimmet(appRole)}
+            navigate={navigate}
+            onCheckin={handleCheckinFromList}
+            onRefresh={() => {
+              fetchAssets();
+              fetchUsers();
+              fetchCategories();
+              fetchManufacturers();
+              fetchLocations();
+            }}
+          />
+        );
+      case 'checked-in-assets':
+        return <CheckedInAssetsPage assets={assets} loading={loading} canManage={canManageZimmet(appRole)} navigate={navigate} onRefresh={() => { fetchAssets(); fetchUsers(); }} />;
       case 'asset-detail':
-        return <AssetDetail assetId={page.id} navigate={navigate} onRefresh={fetchAssets} users={users} locations={locations} />;
+        return <AssetDetail assetId={page.id} navigate={navigate} onRefresh={fetchAssets} users={users} locations={locations} canManage={canManageZimmet(appRole)} />;
       case 'users':
         return <UsersPage users={users} locations={locations} assets={assets} onRefresh={fetchUsers} />;
       case 'locations':
@@ -196,29 +402,52 @@ export default function App() {
     }
   };
 
+  if (!authReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950">
+        <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <LoginPage onLoggedIn={() => { /* session via onAuthStateChange */ }} />;
+  }
+
+  if (mustChangePassword(session)) {
+    return (
+      <ForcePasswordChange
+        onDone={async () => {
+          const { data } = await supabase.auth.getSession();
+          setSession(data.session);
+          setAdminProfile(profileFromSession(data.session));
+        }}
+      />
+    );
+  }
+
   return (
     <div className="flex h-screen overflow-hidden bg-slate-100">
-      {/* Sidebar */}
       <aside
         className={`fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-slate-300 flex flex-col transition-transform duration-200 lg:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         <div className="flex items-center gap-3 px-5 h-16 border-b border-slate-800">
-          <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-brand-600 text-white">
-            <Boxes className="w-5 h-5" />
+          <div className="flex items-center justify-center w-9 h-9 shrink-0">
+            <img src="/final-logo.png" alt={t('universityName')} className="w-9 h-9 object-contain" />
           </div>
           <div>
-            <h1 className="text-white font-bold text-base leading-tight">{t('assetTracker')}</h1>
+            <h1 className="text-white font-bold text-sm leading-tight">{t('universityName')}</h1>
             <p className="text-xs text-slate-500">{t('itInventorySystem')}</p>
           </div>
         </div>
 
         <nav className="flex-1 overflow-y-auto scrollbar-thin py-4 px-3">
-          {groups.map((group) => (
+          {visibleGroups.map((group) => (
             <div key={group} className="mb-5">
               <p className="px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{t(group)}</p>
-              {NAV_ITEMS.filter((i) => i.group === group).map((item) => {
+              {visibleNav.filter((i) => i.group === group).map((item) => {
                 const Icon = item.icon;
                 const isActive = activePage === item.page;
                 return (
@@ -241,26 +470,27 @@ export default function App() {
         </nav>
 
         <div className="p-3 border-t border-slate-800">
-          <div className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-800 cursor-pointer">
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-brand-600 text-white text-sm font-semibold">
-              AD
+          <button
+            type="button"
+            onClick={openProfile}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-800 cursor-pointer text-left"
+          >
+            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-brand-600 text-white text-sm font-semibold shrink-0">
+              {adminInitials(adminProfile)}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white truncate">{t('admin')}</p>
-              <p className="text-xs text-slate-500 truncate">admin@company.com</p>
+              <p className="text-sm font-medium text-white truncate">{adminDisplayName(adminProfile)}</p>
+              <p className="text-xs text-slate-500 truncate">{adminProfile.email}</p>
             </div>
-          </div>
+          </button>
         </div>
       </aside>
 
-      {/* Overlay for mobile */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
-      {/* Main content */}
       <div className="flex-1 flex flex-col lg:ml-64 min-w-0">
-        {/* Top bar */}
         <header className="flex items-center gap-3 h-16 px-4 lg:px-6 bg-white border-b border-gray-200 shrink-0">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -272,7 +502,6 @@ export default function App() {
           <h2 className="text-lg font-semibold text-gray-900">{t(currentLabelKey)}</h2>
 
           <div className="ml-auto flex items-center gap-3">
-            {/* Language toggle */}
             <div className="flex items-center rounded-lg border border-gray-200 overflow-hidden">
               <button
                 onClick={() => setLang('tr')}
@@ -287,28 +516,80 @@ export default function App() {
                 <Globe className="w-3.5 h-3.5" /> EN
               </button>
             </div>
-
-            <div className="relative w-full max-w-xs">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder={t('searchAssets')}
-                value={globalSearch}
-                onChange={(e) => {
-                  setGlobalSearch(e.target.value);
-                  if (page.name !== 'assets') navigate({ name: 'assets' });
-                }}
-                className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 transition-colors"
-              />
-            </div>
           </div>
         </header>
 
-        {/* Page content */}
         <main className="flex-1 overflow-y-auto scrollbar-thin">
           <div className="animate-fade-in">{renderPage()}</div>
         </main>
       </div>
+
+      <Modal
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        title={t('adminProfile')}
+        footer={
+          <div className="flex w-full flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2">
+            <Button variant="danger" onClick={handleSignOut} className="w-full sm:w-auto">
+              <LogOut className="w-4 h-4" /> {t('signOut')}
+            </Button>
+            <div className="flex gap-2 w-full sm:w-auto">
+              <Button variant="secondary" onClick={() => setProfileOpen(false)} className="flex-1 sm:flex-none">{t('cancel')}</Button>
+              <Button onClick={saveProfile} disabled={profileSaving} className="flex-1 sm:flex-none">{t('saveProfile')}</Button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Input
+              label={t('firstName')}
+              value={profileForm.firstName}
+              onChange={(e) => setProfileForm({ ...profileForm, firstName: e.target.value })}
+              autoComplete="given-name"
+            />
+            <Input
+              label={t('lastName')}
+              value={profileForm.lastName}
+              onChange={(e) => setProfileForm({ ...profileForm, lastName: e.target.value })}
+              autoComplete="family-name"
+            />
+          </div>
+          <Input
+            label={t('email')}
+            type="email"
+            value={profileForm.email}
+            onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
+            autoComplete="email"
+          />
+          <div className="pt-2 border-t border-gray-100 space-y-3">
+            <p className="text-xs text-gray-500">{t('changePasswordOptional')}</p>
+            <Input
+              label={t('currentPassword')}
+              type="password"
+              value={profileForm.currentPassword}
+              onChange={(e) => setProfileForm({ ...profileForm, currentPassword: e.target.value })}
+              autoComplete="current-password"
+            />
+            <Input
+              label={t('newPassword')}
+              type="password"
+              value={profileForm.newPassword}
+              onChange={(e) => setProfileForm({ ...profileForm, newPassword: e.target.value })}
+              autoComplete="new-password"
+            />
+            <Input
+              label={t('confirmPassword')}
+              type="password"
+              value={profileForm.confirmPassword}
+              onChange={(e) => setProfileForm({ ...profileForm, confirmPassword: e.target.value })}
+              autoComplete="new-password"
+            />
+          </div>
+          {profileError ? <p className="text-sm text-red-600">{profileError}</p> : null}
+          {profileSuccess ? <p className="text-sm text-emerald-600">{profileSuccess}</p> : null}
+        </div>
+      </Modal>
     </div>
   );
 }

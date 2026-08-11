@@ -12,7 +12,7 @@ interface Props {
 }
 
 export default function LicensesPage({ licenses, categories, manufacturers, onRefresh }: Props) {
-  const { t, lang } = useI18n();
+  const { t, tn, lang } = useI18n();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<License | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<License | null>(null);
@@ -79,8 +79,8 @@ export default function LicensesPage({ licenses, categories, manufacturers, onRe
                     <button onClick={() => setDeleteTarget(l)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-500 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
                   </div>
                 </div>
-                <h3 className="text-sm font-semibold text-gray-900 mb-1">{l.name}</h3>
-                <p className="text-xs text-gray-500 mb-3">{l.manufacturer?.name || '—'} · {l.category?.name || '—'}</p>
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">{tn(l.name)}</h3>
+                <p className="text-xs text-gray-500 mb-3">{l.manufacturer?.name || '—'} · {tn(l.category?.name) || '—'}</p>
 
                 {l.serial && <p className="text-xs font-mono text-gray-400 mb-2 truncate">SN: {l.serial}</p>}
 
@@ -122,7 +122,7 @@ export default function LicensesPage({ licenses, categories, manufacturers, onRe
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
         title={t('deleteLicense')}
-        message={`"${deleteTarget?.name}" ${t('deleteConfirm')}`}
+        message={t('deleteConfirm', { name: deleteTarget?.name || '' })}
       />
     </div>
   );
@@ -136,7 +136,7 @@ function LicenseForm({ license, categories, manufacturers, onClose, onSave, savi
   onSave: (data: Record<string, string>) => void;
   saving: boolean;
 }) {
-  const { t } = useI18n();
+  const { t, tn } = useI18n();
   const [form, setForm] = useState({
     name: license?.name || '',
     serial: license?.serial || '',
@@ -160,7 +160,7 @@ function LicenseForm({ license, categories, manufacturers, onClose, onSave, savi
       }
     >
       <div className="space-y-4">
-        <Input label={`${t('name')} *`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Microsoft 365 Business" required />
+        <Input label={`${t('name')} *`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t('placeholderLicenseName')} required />
         <Input label={t('serial')} value={form.serial} onChange={(e) => setForm({ ...form, serial: e.target.value })} />
         <div className="grid grid-cols-2 gap-4">
           <Select label={t('manufacturer')} value={form.manufacturer_id} onChange={(e) => setForm({ ...form, manufacturer_id: e.target.value })}>
@@ -169,7 +169,7 @@ function LicenseForm({ license, categories, manufacturers, onClose, onSave, savi
           </Select>
           <Select label={t('category')} value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
             <option value="">{t('none')}</option>
-            {categories.filter((c) => c.type === 'license').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {categories.filter((c) => c.type === 'license').map((c) => <option key={c.id} value={c.id}>{tn(c.name)}</option>)}
           </Select>
         </div>
         <div className="grid grid-cols-2 gap-4">

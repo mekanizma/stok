@@ -1,13 +1,19 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim();
+const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim();
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error(
+    'Supabase yapılandırması eksik. .env dosyasına VITE_SUPABASE_URL ve VITE_SUPABASE_ANON_KEY ekleyin.'
+  );
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // ---- Types ----
 
-export type AssetStatus = 'ready' | 'deployed' | 'pending' | 'broken' | 'lost';
+export type AssetStatus = 'ready' | 'deployed';
 export type CategoryType = 'asset' | 'license' | 'accessory' | 'consumable';
 export type CheckoutAction = 'checkout' | 'checkin' | 'audit';
 
@@ -45,6 +51,7 @@ export interface UserRecord {
   job_title: string | null;
   employee_num: string | null;
   location_id: string | null;
+  app_role: 'admin' | 'hr' | 'it' | null;
   created_at: string;
   location?: Location | null;
 }
@@ -59,6 +66,8 @@ export interface Asset {
   category_id: string | null;
   default_location_id: string | null;
   assigned_to_id: string | null;
+  assignee_name: string | null;
+  assignee_email: string | null;
   status: AssetStatus;
   purchase_date: string | null;
   purchase_cost: number | null;
@@ -82,6 +91,7 @@ export interface Accessory {
   category_id: string | null;
   qty: number;
   remaining_qty: number;
+  min_qty: number;
   created_at: string;
   manufacturer?: Manufacturer | null;
   category?: Category | null;
@@ -94,6 +104,7 @@ export interface Consumable {
   category_id: string | null;
   qty: number;
   remaining_qty: number;
+  min_qty: number;
   created_at: string;
   manufacturer?: Manufacturer | null;
   category?: Category | null;
@@ -123,6 +134,8 @@ export interface CheckoutHistory {
   assigned_to_id: string | null;
   action: CheckoutAction;
   note: string | null;
+  performed_by_name: string | null;
+  performed_by_email: string | null;
   created_at: string;
   asset?: Asset | null;
   assigned_to?: UserRecord | null;
