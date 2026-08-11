@@ -59,7 +59,15 @@ export function notifyCriticalStock(action: 'scan' | 'force' | 'test' | 'status'
 
 export async function invokeStockAlert(action: 'scan' | 'force' | 'test' | 'status') {
   const { data, error } = await supabase.functions.invoke('stock-alert', { body: { action } });
-  if (error) throw error;
+  if (error) {
+    const msg = error.message || String(error);
+    if (/failed to send a request to the edge function/i.test(msg) || /not found/i.test(msg)) {
+      throw new Error(
+        'stock-alert Edge Function bulunamadı. Supabase’de fonksiyonu deploy edin ve RESEND_API_KEY secret ekleyin.',
+      );
+    }
+    throw error;
+  }
   if (data?.error) throw new Error(String(data.error));
   return data as Record<string, unknown>;
 }
