@@ -24,7 +24,7 @@ import DeployedAssetsPage from '@/pages/DeployedAssets';
 import CheckedInAssetsPage from '@/pages/CheckedInAssets';
 import LoginPage from '@/pages/Login';
 import ForcePasswordChange from '@/pages/ForcePasswordChange';
-import { getSessionRole, roleFromDb, canAccessPage, defaultPageForRole, canEditDeployedAssets, canManageZimmet, type AppRole } from '@/lib/roles';
+import { getSessionRole, roleFromDb, canAccessPage, defaultPageForRole, canEditDeployedAssets, canManageZimmet, canManageUsers, type AppRole } from '@/lib/roles';
 import { insertCheckoutHistory } from '@/lib/checkoutHistory';
 
 function profileFromSession(session: Session | null): AdminProfile {
@@ -414,7 +414,7 @@ export default function App() {
       case 'activity':
         return <ActivityPage />;
       case 'settings':
-        return <SettingsPage />;
+        return <SettingsPage canConfigureAlerts={canManageUsers(appRole)} />;
     }
   };
 

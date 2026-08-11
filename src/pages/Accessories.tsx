@@ -3,6 +3,7 @@ import { supabase, type Accessory, type Category, type Manufacturer } from '@/li
 import { Plus, Edit3, Trash2, Package, Search, AlertTriangle, Boxes, CheckCircle2 } from 'lucide-react';
 import { Button, Modal, Input, Select, PageHeader, EmptyState, ConfirmDialog } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
+import { notifyCriticalStock } from '@/lib/stockAlerts';
 
 interface Props {
   accessories: Accessory[];
@@ -48,10 +49,11 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
     const qty = Math.max(1, parseInt(String(data.qty), 10) || 1);
     const minQty = Math.max(0, parseInt(String(data.min_qty), 10) || 0);
     if (editing) {
+      const remaining = Math.min(qty, Math.max(0, parseInt(String(data.remaining_qty), 10) || 0));
       await supabase.from('accessories').update({
         name: data.name, manufacturer_id: data.manufacturer_id || null,
         category_id: data.category_id || null, qty, min_qty: minQty,
-        remaining_qty: Math.min(editing.remaining_qty, qty),
+        remaining_qty: remaining,
       }).eq('id', editing.id);
     } else {
       await supabase.from('accessories').insert({
@@ -63,6 +65,7 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
     setShowForm(false);
     setEditing(null);
     onRefresh();
+    notifyCriticalStock('scan');
   };
 
   const handleDelete = async (id: string) => {
@@ -223,6 +226,7 @@ function AccessoryForm({ accessory, categories, manufacturers, onClose, onSave, 
     manufacturer_id: accessory?.manufacturer_id || '',
     category_id: accessory?.category_id || '',
     qty: accessory ? String(accessory.qty) : '1',
+    remaining_qty: accessory ? String(accessory.remaining_qty) : '1',
     min_qty: accessory ? String(accessory.min_qty ?? 1) : '1',
   });
 
@@ -250,8 +254,15 @@ function AccessoryForm({ accessory, categories, manufacturers, onClose, onSave, 
         </Select>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Input label={t('quantity')} type="number" min="1" value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })} />
-          <Input label={t('lowStockQty')} type="number" min="0" value={form.min_qty} onChange={(e) => setForm({ ...form, min_qty: e.target.value })} />
+          {accessory ? (
+            <Input label={t('remaining')} type="number" min="0" value={form.remaining_qty} onChange={(e) => setForm({ ...form, remaining_qty: e.target.value })} />
+          ) : (
+            <Input label={t('lowStockQty')} type="number" min="0" value={form.min_qty} onChange={(e) => setForm({ ...form, min_qty: e.target.value })} />
+          )}
         </div>
+        {accessory ? (
+          <Input label={t('lowStockQty')} type="number" min="0" value={form.min_qty} onChange={(e) => setForm({ ...form, min_qty: e.target.value })} />
+        ) : null}
         <p className="text-xs text-gray-500 -mt-2">{t('lowStockQtyHint')}</p>
       </div>
     </Modal>
