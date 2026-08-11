@@ -24,7 +24,7 @@ import DeployedAssetsPage from '@/pages/DeployedAssets';
 import CheckedInAssetsPage from '@/pages/CheckedInAssets';
 import LoginPage from '@/pages/Login';
 import ForcePasswordChange from '@/pages/ForcePasswordChange';
-import { getSessionRole, canAccessPage, defaultPageForRole, canEditDeployedAssets, canManageZimmet, type AppRole } from '@/lib/roles';
+import { getSessionRole, roleFromDb, canAccessPage, defaultPageForRole, canEditDeployedAssets, canManageZimmet, type AppRole } from '@/lib/roles';
 import { insertCheckoutHistory } from '@/lib/checkoutHistory';
 
 function profileFromSession(session: Session | null): AdminProfile {
@@ -34,19 +34,11 @@ function profileFromSession(session: Session | null): AdminProfile {
     firstName: (meta.first_name as string) || (meta.full_name as string)?.split(' ')[0] || 'Admin',
     lastName: (meta.last_name as string) || '',
     email: user?.email || 'admin@stoktakip.com',
-    password: '',
   };
 }
 
 function mustChangePassword(session: Session | null) {
   return session?.user?.user_metadata?.must_change_password === true;
-}
-
-function roleFromSession(session: Session | null): AppRole {
-  return getSessionRole(
-    session?.user?.user_metadata as Record<string, unknown> | undefined,
-    session?.user?.email,
-  );
 }
 
 export type Page =
@@ -91,7 +83,7 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [page, setPage] = useState<Page>({ name: 'dashboard' });
-  const appRole = roleFromSession(session);
+  const [appRole, setAppRole] = useState<AppRole>('it');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [adminProfile, setAdminProfile] = useState<AdminProfile>(() => profileFromSession(null));
   const [profileOpen, setProfileOpen] = useState(false);
@@ -184,33 +176,58 @@ export default function App() {
     ]);
   }, [fetchAssets, fetchUsers, fetchCategories, fetchManufacturers, fetchLocations, fetchAccessories, fetchConsumables, fetchLicenses]);
 
+  const resolveAppRole = useCallback(async (nextSession: Session | null): Promise<AppRole> => {
+    if (!nextSession?.user?.email) return 'it';
+    const email = nextSession.user.email;
+    if (email.toLowerCase() === 'admin@stoktakip.com') return 'admin';
+    const { data } = await supabase
+      .from('users')
+      .select('app_role')
+      .ilike('email', email)
+      .maybeSingle();
+    if (data?.app_role) return roleFromDb(data.app_role, email);
+    // Fallback: app_metadata.app_role (server-set), never trust client-writable user_metadata.role alone for admin
+    const appMeta = (nextSession.user.app_metadata || {}) as Record<string, unknown>;
+    const metaRole = String(appMeta.app_role || '').toLowerCase();
+    if (metaRole === 'admin' || metaRole === 'hr' || metaRole === 'it') return metaRole;
+    return getSessionRole(
+      { role: nextSession.user.user_metadata?.role },
+      email,
+    );
+  }, []);
+
   useEffect(() => {
     let mounted = true;
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       if (!mounted) return;
       setSession(data.session);
       setAdminProfile(profileFromSession(data.session));
-      if (data.session) {
-        setPage(defaultPageForRole(roleFromSession(data.session)));
-      }
+      const role = await resolveAppRole(data.session);
+      if (!mounted) return;
+      setAppRole(role);
+      if (data.session) setPage(defaultPageForRole(role));
       setAuthReady(true);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
-      setSession(next);
-      setAdminProfile(profileFromSession(next));
-      setAuthReady(true);
-      if (event === 'SIGNED_IN' && next) {
-        setPage(defaultPageForRole(roleFromSession(next)));
-      }
-      if (event === 'SIGNED_OUT') {
-        setPage({ name: 'dashboard' });
-      }
+      void (async () => {
+        setSession(next);
+        setAdminProfile(profileFromSession(next));
+        const role = await resolveAppRole(next);
+        setAppRole(role);
+        setAuthReady(true);
+        if (event === 'SIGNED_IN' && next) {
+          setPage(defaultPageForRole(role));
+        }
+        if (event === 'SIGNED_OUT') {
+          setPage({ name: 'dashboard' });
+        }
+      })();
     });
     return () => {
       mounted = false;
       sub.subscription.unsubscribe();
     };
-  }, []);
+  }, [resolveAppRole]);
 
   useEffect(() => {
     if (!session) return;
@@ -297,7 +314,6 @@ export default function App() {
         first_name: firstName,
         last_name: lastName,
         full_name: [firstName, lastName].filter(Boolean).join(' '),
-        role: 'admin',
       },
     });
     if (metaError) {

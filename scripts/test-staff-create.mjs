@@ -3,15 +3,22 @@ import dns from 'node:dns';
 
 dns.setDefaultResultOrder('ipv4first');
 
-const url = 'https://osffdlhpanwboarjpluz.supabase.co';
-const anon = 'sb_publishable_z06nHmu9u2hJfFpRTLFyCQ_ebyzPJ4a';
-const dbPass = encodeURIComponent('Kaprencasper34');
+const url = process.env.VITE_SUPABASE_URL?.trim();
+const anon = process.env.VITE_SUPABASE_ANON_KEY?.trim();
+const adminEmail = process.env.ADMIN_EMAIL?.trim() || 'admin@stoktakip.com';
+const adminPassword = process.env.ADMIN_PASSWORD?.trim();
+const dbPassword = process.env.SUPABASE_DB_PASSWORD?.trim();
+const projectRef = process.env.SUPABASE_PROJECT_REF?.trim() || 'osffdlhpanwboarjpluz';
 
-// Login as admin
+if (!url || !anon || !adminPassword || !dbPassword) {
+  console.error('Gerekli env: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, ADMIN_PASSWORD, SUPABASE_DB_PASSWORD');
+  process.exit(1);
+}
+
 const login = await fetch(`${url}/auth/v1/token?grant_type=password`, {
   method: 'POST',
   headers: { apikey: anon, 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email: 'admin@stoktakip.com', password: 'Kaprencasper34' }),
+  body: JSON.stringify({ email: adminEmail, password: adminPassword }),
 });
 const loginJson = await login.json();
 if (!login.ok) {
@@ -21,7 +28,6 @@ if (!login.ok) {
 const token = loginJson.access_token;
 console.log('admin logged in');
 
-// Create staff via RPC
 const testEmail = `test.user.${Date.now()}@stoktakip.com`;
 const rpc = await fetch(`${url}/rest/v1/rpc/create_staff_user`, {
   method: 'POST',
@@ -38,12 +44,12 @@ const rpc = await fetch(`${url}/rest/v1/rpc/create_staff_user`, {
     p_job_title: 'Staff',
     p_employee_num: null,
     p_location_id: null,
+    p_role: 'it',
   }),
 });
 const rpcText = await rpc.text();
 console.log('create_staff_user', rpc.status, rpcText);
 
-// Login as new user with password 1
 const userLogin = await fetch(`${url}/auth/v1/token?grant_type=password`, {
   method: 'POST',
   headers: { apikey: anon, 'Content-Type': 'application/json' },
@@ -52,9 +58,9 @@ const userLogin = await fetch(`${url}/auth/v1/token?grant_type=password`, {
 const userJson = await userLogin.json();
 console.log('user login', userLogin.status, userJson.user?.user_metadata?.must_change_password);
 
-// Cleanup test user
+const dbPass = encodeURIComponent(dbPassword);
 const client = new pg.Client({
-  connectionString: `postgresql://postgres.osffdlhpanwboarjpluz:${dbPass}@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres`,
+  connectionString: `postgresql://postgres.${projectRef}:${dbPass}@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres`,
   ssl: { rejectUnauthorized: false },
 });
 await client.connect();

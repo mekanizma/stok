@@ -7,7 +7,11 @@ import dns from 'node:dns';
 dns.setDefaultResultOrder('ipv4first');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const password = encodeURIComponent(process.env.SUPABASE_DB_PASSWORD || 'Kaprencasper34');
+if (!process.env.SUPABASE_DB_PASSWORD) {
+  console.error('SUPABASE_DB_PASSWORD gerekli.');
+  process.exit(1);
+}
+const password = encodeURIComponent(process.env.SUPABASE_DB_PASSWORD);
 const client = new pg.Client({
   connectionString: `postgresql://postgres.osffdlhpanwboarjpluz:${password}@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres`,
   ssl: { rejectUnauthorized: false },

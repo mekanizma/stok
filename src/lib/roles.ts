@@ -28,10 +28,17 @@ const IT_BLOCKED_PAGES: AppPageName[] = ['users', 'locations'];
 export function getSessionRole(meta: Record<string, unknown> | undefined, email?: string | null): AppRole {
   if (email?.toLowerCase() === 'admin@stoktakip.com') return 'admin';
   const role = String(meta?.role || '').toLowerCase();
-  if (role === 'admin') return 'admin';
+  // Never elevate to admin from client-writable metadata alone
   if (role === 'hr') return 'hr';
   if (role === 'it') return 'it';
-  // legacy accounts without role → full IT access
+  return 'it';
+}
+
+/** Resolve role from public.users.app_role (authoritative for UI). */
+export function roleFromDb(appRole: string | null | undefined, email?: string | null): AppRole {
+  if (email?.toLowerCase() === 'admin@stoktakip.com') return 'admin';
+  const role = String(appRole || '').toLowerCase();
+  if (role === 'admin' || role === 'hr' || role === 'it') return role;
   return 'it';
 }
 

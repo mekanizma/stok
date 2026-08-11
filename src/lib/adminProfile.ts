@@ -4,14 +4,12 @@ export interface AdminProfile {
   firstName: string;
   lastName: string;
   email: string;
-  password: string;
 }
 
 const DEFAULT_PROFILE: AdminProfile = {
   firstName: 'Admin',
   lastName: '',
   email: 'admin@company.com',
-  password: '',
 };
 
 export function loadAdminProfile(): AdminProfile {
@@ -23,7 +21,6 @@ export function loadAdminProfile(): AdminProfile {
       firstName: parsed.firstName?.trim() || DEFAULT_PROFILE.firstName,
       lastName: parsed.lastName?.trim() || '',
       email: parsed.email?.trim() || DEFAULT_PROFILE.email,
-      password: typeof parsed.password === 'string' ? parsed.password : '',
     };
   } catch {
     return { ...DEFAULT_PROFILE };
@@ -31,7 +28,14 @@ export function loadAdminProfile(): AdminProfile {
 }
 
 export function saveAdminProfile(profile: AdminProfile) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      email: profile.email,
+    }),
+  );
 }
 
 export function adminDisplayName(profile: AdminProfile) {
