@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { supabase, type Category, type Asset } from '@/lib/supabase';
-import { Plus, Edit3, Trash2, Tags, Boxes, KeyRound, Package, PackageCheck } from 'lucide-react';
+import { Plus, Edit3, Trash2, Tags, Boxes, KeyRound, Package, PackageCheck, Check } from 'lucide-react';
 import { Button, Modal, Input, Select, PageHeader, EmptyState, ConfirmDialog } from '@/components/ui';
 import { useI18n, type TranslationKey } from '@/lib/i18n';
 
@@ -15,7 +15,22 @@ const TYPE_ICONS: Record<string, typeof Tags> = {
   asset: Boxes, license: KeyRound, accessory: Package, consumable: PackageCheck,
 };
 
-const COLORS = ['blue', 'cyan', 'emerald', 'amber', 'rose', 'violet', 'teal', 'orange', 'pink', 'slate', 'red', 'indigo'];
+const COLOR_STYLES: Record<string, { swatch: string; icon: string }> = {
+  blue: { swatch: 'bg-blue-500', icon: 'bg-blue-50 text-blue-600' },
+  cyan: { swatch: 'bg-cyan-500', icon: 'bg-cyan-50 text-cyan-600' },
+  emerald: { swatch: 'bg-emerald-500', icon: 'bg-emerald-50 text-emerald-600' },
+  amber: { swatch: 'bg-amber-500', icon: 'bg-amber-50 text-amber-600' },
+  rose: { swatch: 'bg-rose-500', icon: 'bg-rose-50 text-rose-600' },
+  violet: { swatch: 'bg-violet-500', icon: 'bg-violet-50 text-violet-600' },
+  teal: { swatch: 'bg-teal-500', icon: 'bg-teal-50 text-teal-600' },
+  orange: { swatch: 'bg-orange-500', icon: 'bg-orange-50 text-orange-600' },
+  pink: { swatch: 'bg-pink-500', icon: 'bg-pink-50 text-pink-600' },
+  slate: { swatch: 'bg-slate-500', icon: 'bg-slate-50 text-slate-600' },
+  red: { swatch: 'bg-red-500', icon: 'bg-red-50 text-red-600' },
+  indigo: { swatch: 'bg-indigo-500', icon: 'bg-indigo-50 text-indigo-600' },
+};
+
+const COLORS = Object.keys(COLOR_STYLES);
 
 export default function CategoriesPage({ categories, assets, onRefresh, canDelete = false }: Props) {
   const { t, tn } = useI18n();
@@ -66,7 +81,7 @@ export default function CategoriesPage({ categories, assets, onRefresh, canDelet
             return (
               <div key={c.id} className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md transition-shadow">
                 <div className="flex items-start justify-between mb-3">
-                  <div className={`flex items-center justify-center w-10 h-10 rounded-lg bg-${c.color}-50 text-${c.color}-600`}>
+                  <div className={`flex items-center justify-center w-10 h-10 rounded-lg ${COLOR_STYLES[c.color]?.icon || COLOR_STYLES.slate.icon}`}>
                     <Icon className="w-5 h-5" />
                   </div>
                   <div className="flex gap-1">
@@ -141,15 +156,24 @@ function CategoryForm({ category, onClose, onSave, saving }: {
         </Select>
         <div>
           <label className="block mb-1.5 text-sm font-medium text-gray-700">{t('color')}</label>
-          <div className="flex flex-wrap gap-2">
-            {COLORS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setForm({ ...form, color: c })}
-                className={`w-8 h-8 rounded-lg bg-${c}-500 ${form.color === c ? 'ring-2 ring-offset-2 ring-gray-400' : ''}`}
-              />
-            ))}
+          <div className="grid grid-cols-6 sm:grid-cols-8 gap-2">
+            {COLORS.map((c) => {
+              const selected = form.color === c;
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setForm({ ...form, color: c })}
+                  aria-label={c}
+                  aria-pressed={selected}
+                  className={`relative flex items-center justify-center aspect-square min-h-10 rounded-lg ${COLOR_STYLES[c].swatch} ${
+                    selected ? 'ring-2 ring-offset-2 ring-gray-800' : 'ring-1 ring-black/10'
+                  }`}
+                >
+                  {selected ? <Check className="w-4 h-4 text-white drop-shadow" /> : null}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
