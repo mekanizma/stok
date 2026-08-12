@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef } from 'react';
-import { supabase, type Asset, type Category, type Manufacturer, type Location } from '@/lib/supabase';
+import { supabase, type Asset, type Accessory, type Category, type Manufacturer, type Location } from '@/lib/supabase';
 import { Search, Boxes, ArrowRightLeft, Plus, Upload, Download, FileSpreadsheet, Edit3, Trash2 } from 'lucide-react';
 import { type Page } from '@/App';
 import { StatusBadge, Button, Modal, Input, Select, Textarea, PageHeader, EmptyState, Avatar, ConfirmDialog, TablePagination, type PageSize } from '@/components/ui';
@@ -14,9 +14,11 @@ import {
 } from '@/lib/zimmetImport';
 import { repairTurkishName } from '@/lib/turkishNames';
 import { insertCheckoutHistory } from '@/lib/checkoutHistory';
+import { issueStock } from '@/lib/stockIssue';
 
 interface Props {
   assets: Asset[];
+  accessories?: Accessory[];
   categories: Category[];
   manufacturers: Manufacturer[];
   locations: Location[];
@@ -25,7 +27,7 @@ interface Props {
   canManage?: boolean;
   canDelete?: boolean;
   navigate: (p: Page) => void;
-  onCheckin: (asset: Asset) => void;
+  onCheckin: (asset: Asset, locationId?: string | null) => void;
   onRefresh: () => void;
 }
 
@@ -60,7 +62,7 @@ async function resolveOrCreateLocation(name: string, existing: Location[]): Prom
 }
 
 export default function DeployedAssetsPage({
-  assets, categories, manufacturers, locations, loading, canEdit = false, canManage = false, canDelete = false, navigate, onCheckin, onRefresh,
+  assets, accessories = [], categories, manufacturers, locations, loading, canEdit = false, canManage = false, canDelete = false, navigate, onCheckin, onRefresh,
 }: Props) {
   const { t, tn } = useI18n();
   const [search, setSearch] = useState('');
@@ -72,6 +74,7 @@ export default function DeployedAssetsPage({
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const [checkinTarget, setCheckinTarget] = useState<Asset | null>(null);
+  const [checkinLocationId, setCheckinLocationId] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Asset | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [addError, setAddError] = useState('');
@@ -103,6 +106,16 @@ export default function DeployedAssetsPage({
         );
       });
   }, [assets, search, locations]);
+
+  const readyInventory = useMemo(
+    () => assets.filter((a) => a.status === 'ready').sort((a, b) => a.name.localeCompare(b.name, 'tr')),
+    [assets],
+  );
+
+  const readyAccessories = useMemo(
+    () => accessories.filter((a) => a.remaining_qty > 0).sort((a, b) => a.name.localeCompare(b.name, 'tr')),
+    [accessories],
+  );
 
   const totalPages = Math.max(1, Math.ceil(deployed.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -159,6 +172,40 @@ export default function DeployedAssetsPage({
     });
   };
 
+  const deployExistingAsset = async (assetId: string, data: {
+    assignee_name?: string;
+    email?: string;
+    notes?: string;
+    default_location_id?: string | null;
+  }) => {
+    const assigneeName = repairTurkishName(data.assignee_name) || t('unknownAssignee');
+    const assigneeEmail = (data.email || '').trim().toLowerCase();
+
+    const { error } = await supabase
+      .from('assets')
+      .update({
+        status: 'deployed',
+        assigned_to_id: null,
+        assignee_name: assigneeName,
+        assignee_email: assigneeEmail || null,
+        default_location_id: data.default_location_id || null,
+        notes: data.notes?.trim() || null,
+      })
+      .eq('id', assetId)
+      .eq('status', 'ready');
+
+    if (error) throw new Error(error.message || t('saveFailed'));
+
+    await insertCheckoutHistory({
+      asset_id: assetId,
+      assigned_to_id: null,
+      action: 'checkout',
+      qty: 1,
+      given_to: assigneeName,
+      note: `${t('checkedOutFromAssets')} — ${assigneeName}${assigneeEmail ? ` (${assigneeEmail})` : ''}`,
+    });
+  };
+
   const handleAddCheckout = async (data: Record<string, string>) => {
     if (!canManage) return;
     const hasSomething = Object.values(data).some((v) => String(v || '').trim());
@@ -166,18 +213,46 @@ export default function DeployedAssetsPage({
     setSaving(true);
     setAddError('');
     try {
-      await createDeployedAsset({
-        name: data.name,
-        asset_tag: data.asset_tag,
-        serial: data.serial,
-        model: data.model,
-        manufacturer_id: data.manufacturer_id || null,
-        category_id: data.category_id || null,
-        default_location_id: data.default_location_id || null,
-        assignee_name: data.assignee_name,
-        email: data.email,
-        notes: data.notes,
-      });
+      if (data.source_asset_id) {
+        await deployExistingAsset(data.source_asset_id, {
+          assignee_name: data.assignee_name,
+          email: data.email,
+          notes: data.notes,
+          default_location_id: data.default_location_id || null,
+        });
+      } else if (data.source_accessory_id) {
+        const acc = accessories.find((a) => a.id === data.source_accessory_id);
+        if (!acc || acc.remaining_qty <= 0) throw new Error(t('notEnoughStock'));
+        const person = repairTurkishName(data.assignee_name) || t('unknownAssignee');
+        const email = (data.email || '').trim().toLowerCase();
+        const givenTo = email ? `${person} (${email})` : person;
+        await issueStock({
+          kind: 'accessory',
+          itemId: acc.id,
+          remaining: acc.remaining_qty,
+          qty: 1,
+          givenTo,
+          note: data.notes,
+          itemName: data.name || acc.name,
+          categoryId: data.category_id || acc.category_id,
+          manufacturerId: data.manufacturer_id || acc.manufacturer_id,
+          locationId: data.default_location_id || acc.location_id,
+          serial: data.serial || acc.serial,
+        });
+      } else {
+        await createDeployedAsset({
+          name: data.name,
+          asset_tag: data.asset_tag,
+          serial: data.serial,
+          model: data.model,
+          manufacturer_id: data.manufacturer_id || null,
+          category_id: data.category_id || null,
+          default_location_id: data.default_location_id || null,
+          assignee_name: data.assignee_name,
+          email: data.email,
+          notes: data.notes,
+        });
+      }
       setShowAdd(false);
       onRefresh();
     } catch (err) {
@@ -504,7 +579,14 @@ export default function DeployedAssetsPage({
                             </button>
                           ) : null}
                           {canManage ? (
-                            <button onClick={() => setCheckinTarget(a)} title={t('checkIn')} className="p-1.5 rounded-lg hover:bg-emerald-50 text-gray-500 hover:text-emerald-600 transition-colors">
+                            <button
+                              onClick={() => {
+                                setCheckinTarget(a);
+                                setCheckinLocationId(a.default_location_id || '');
+                              }}
+                              title={t('checkIn')}
+                              className="p-1.5 rounded-lg hover:bg-emerald-50 text-gray-500 hover:text-emerald-600 transition-colors"
+                            >
                               <ArrowRightLeft className="w-4 h-4" />
                             </button>
                           ) : null}
@@ -538,6 +620,8 @@ export default function DeployedAssetsPage({
 
       {canManage && showAdd && (
         <CheckoutForm
+          inventoryAssets={readyInventory}
+          inventoryAccessories={readyAccessories}
           categories={categories}
           manufacturers={manufacturers}
           locations={locations}
@@ -604,20 +688,43 @@ export default function DeployedAssetsPage({
         </div>
       </Modal>
 
-      <ConfirmDialog
+      <Modal
         open={canManage && !!checkinTarget}
-        onClose={() => setCheckinTarget(null)}
-        onConfirm={() => {
-          if (!canManage || !checkinTarget) return;
-          onCheckin(checkinTarget);
-          setCheckinTarget(null);
-          navigate({ name: 'checked-in-assets' });
-        }}
+        onClose={() => { setCheckinTarget(null); setCheckinLocationId(''); }}
         title={t('checkInConfirmTitle')}
-        message={t('checkInConfirmMsg', { name: getAssetDisplayName(checkinTarget) })}
-        confirmLabel={t('checkIn')}
-        confirmVariant="primary"
-      />
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => { setCheckinTarget(null); setCheckinLocationId(''); }}>{t('cancel')}</Button>
+            <Button
+              onClick={() => {
+                if (!canManage || !checkinTarget) return;
+                onCheckin(checkinTarget, checkinLocationId || null);
+                setCheckinTarget(null);
+                setCheckinLocationId('');
+                navigate({ name: 'checked-in-assets' });
+              }}
+              disabled={!checkinLocationId}
+            >
+              {t('checkIn')}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">{t('checkInConfirmMsg', { name: getAssetDisplayName(checkinTarget) })}</p>
+          <Select
+            label={`${t('checkInLocation')} *`}
+            value={checkinLocationId}
+            onChange={(e) => setCheckinLocationId(e.target.value)}
+          >
+            <option value="">{t('selectLocation')}</option>
+            {locations.map((l) => (
+              <option key={l.id} value={l.id}>{tn(l.name)}</option>
+            ))}
+          </Select>
+        </div>
+      </Modal>
 
       <ConfirmDialog
         open={canDelete && !!deleteTarget}
@@ -632,8 +739,10 @@ export default function DeployedAssetsPage({
   );
 }
 
-function CheckoutForm({ asset, categories, manufacturers, locations, onClose, onSave, saving, error }: {
+function CheckoutForm({ asset, inventoryAssets = [], inventoryAccessories = [], categories, manufacturers, locations, onClose, onSave, saving, error }: {
   asset?: Asset | null;
+  inventoryAssets?: Asset[];
+  inventoryAccessories?: Accessory[];
   categories: Category[];
   manufacturers: Manufacturer[];
   locations: Location[];
@@ -648,6 +757,8 @@ function CheckoutForm({ asset, categories, manufacturers, locations, onClose, on
   const [fillErr, setFillErr] = useState('');
   const assignee = getAssetAssignee(asset);
   const [form, setForm] = useState({
+    source_asset_id: '',
+    source_accessory_id: '',
     name: asset?.name || '',
     asset_tag: asset?.asset_tag || '',
     serial: asset?.serial || '',
@@ -661,7 +772,63 @@ function CheckoutForm({ asset, categories, manufacturers, locations, onClose, on
   });
 
   const isEdit = Boolean(asset);
-  const canSave = Object.values(form).some((v) => String(v || '').trim().length > 0);
+  const inventoryValue = form.source_asset_id
+    ? `asset:${form.source_asset_id}`
+    : form.source_accessory_id
+      ? `accessory:${form.source_accessory_id}`
+      : '';
+  const fromInventory = Boolean(inventoryValue);
+  const canSave = fromInventory
+    ? Boolean(form.assignee_name.trim())
+    : Object.values(form).some((v) => String(v || '').trim().length > 0);
+
+  const applyInventoryPick = (value: string) => {
+    if (!value) {
+      setForm((prev) => ({
+        ...prev,
+        source_asset_id: '',
+        source_accessory_id: '',
+      }));
+      return;
+    }
+    if (value.startsWith('asset:')) {
+      const id = value.slice(6);
+      const picked = inventoryAssets.find((a) => a.id === id);
+      if (!picked) return;
+      setForm((prev) => ({
+        ...prev,
+        source_asset_id: picked.id,
+        source_accessory_id: '',
+        name: picked.name || '',
+        asset_tag: picked.asset_tag || '',
+        serial: picked.serial || '',
+        model: picked.model || '',
+        manufacturer_id: picked.manufacturer_id || '',
+        category_id: picked.category_id || '',
+        default_location_id: picked.default_location_id || prev.default_location_id,
+        notes: picked.notes || prev.notes,
+      }));
+      return;
+    }
+    if (value.startsWith('accessory:')) {
+      const id = value.slice(10);
+      const picked = inventoryAccessories.find((a) => a.id === id);
+      if (!picked) return;
+      setForm((prev) => ({
+        ...prev,
+        source_asset_id: '',
+        source_accessory_id: picked.id,
+        name: picked.name || '',
+        asset_tag: '',
+        serial: picked.serial || '',
+        model: '',
+        manufacturer_id: picked.manufacturer_id || '',
+        category_id: picked.category_id || '',
+        default_location_id: picked.location_id || prev.default_location_id,
+        notes: prev.notes,
+      }));
+    }
+  };
 
   const applyRowToForm = (row: ZimmetImportRow) => {
     const catId = row.category
@@ -726,34 +893,79 @@ function CheckoutForm({ asset, categories, manufacturers, locations, onClose, on
       }
     >
       <div className="space-y-4">
-        <div className="rounded-xl border border-dashed border-gray-200 bg-slate-50 px-3 py-3">
-          <input
-            ref={fillFileRef}
-            type="file"
-            accept=".csv,.xlsx,.xls,.docx,.xml,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/xml,application/xml"
-            className="hidden"
-            onChange={(e) => {
-              void handleFillFile(e.target.files?.[0] || null);
-              e.target.value = '';
-            }}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="w-full sm:w-auto"
-            onClick={() => fillFileRef.current?.click()}
-          >
-            <Upload className="w-4 h-4" /> {t('fillFromFile')}
-          </Button>
-          <p className="mt-2 text-xs text-gray-500">{t('importCsvHint')}</p>
-          {fillMsg ? <p className="mt-1 text-xs text-emerald-600">{fillMsg}</p> : null}
-          {fillErr ? <p className="mt-1 text-xs text-red-600">{fillErr}</p> : null}
-        </div>
+        {!isEdit ? (
+          <div className="rounded-xl border border-brand-100 bg-brand-50/40 px-3 py-3 space-y-2">
+            <Select
+              label={t('selectFromInventory')}
+              value={inventoryValue}
+              onChange={(e) => applyInventoryPick(e.target.value)}
+            >
+              <option value="">{t('manualZimmetEntry')}</option>
+              {inventoryAssets.length > 0 ? (
+                <optgroup label={t('assets')}>
+                  {inventoryAssets.map((a) => {
+                    const brand = a.manufacturer?.name || '—';
+                    const serial = a.serial || '—';
+                    return (
+                      <option key={`asset-${a.id}`} value={`asset:${a.id}`}>
+                        {getAssetDisplayName(a)} · {brand} · {a.model || '—'} · SN:{serial}
+                      </option>
+                    );
+                  })}
+                </optgroup>
+              ) : null}
+              {inventoryAccessories.length > 0 ? (
+                <optgroup label={t('accessories')}>
+                  {inventoryAccessories.map((a) => {
+                    const brand = a.manufacturer?.name || '—';
+                    const serial = a.serial || '—';
+                    return (
+                      <option key={`acc-${a.id}`} value={`accessory:${a.id}`}>
+                        {a.name} · {brand} · SN:{serial} · {a.remaining_qty} {t('pcs')}
+                      </option>
+                    );
+                  })}
+                </optgroup>
+              ) : null}
+            </Select>
+            <p className="text-xs text-gray-500">
+              {inventoryAssets.length === 0 && inventoryAccessories.length === 0
+                ? t('noReadyInventory')
+                : t('selectFromInventoryHint')}
+            </p>
+          </div>
+        ) : null}
+
+        {!isEdit && !fromInventory ? (
+          <div className="rounded-xl border border-dashed border-gray-200 bg-slate-50 px-3 py-3">
+            <input
+              ref={fillFileRef}
+              type="file"
+              accept=".csv,.xlsx,.xls,.docx,.xml,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/xml,application/xml"
+              className="hidden"
+              onChange={(e) => {
+                void handleFillFile(e.target.files?.[0] || null);
+                e.target.value = '';
+              }}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full sm:w-auto"
+              onClick={() => fillFileRef.current?.click()}
+            >
+              <Upload className="w-4 h-4" /> {t('fillFromFile')}
+            </Button>
+            <p className="mt-2 text-xs text-gray-500">{t('importCsvHint')}</p>
+            {fillMsg ? <p className="mt-1 text-xs text-emerald-600">{fillMsg}</p> : null}
+            {fillErr ? <p className="mt-1 text-xs text-red-600">{fillErr}</p> : null}
+          </div>
+        ) : null}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Input
-            label={t('fullName')}
+            label={`${t('fullName')} *`}
             value={form.assignee_name}
             onChange={(e) => setForm({ ...form, assignee_name: e.target.value })}
             placeholder={t('placeholderPersonName')}
@@ -767,15 +979,15 @@ function CheckoutForm({ asset, categories, manufacturers, locations, onClose, on
           />
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input label={t('name')} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t('placeholderAssetName')} />
-          <Input label={t('assetTag')} value={form.asset_tag} onChange={(e) => setForm({ ...form, asset_tag: e.target.value })} placeholder={t('autoGenerated')} />
-          <Input label={t('serial')} value={form.serial} onChange={(e) => setForm({ ...form, serial: e.target.value })} />
-          <Input label={t('model')} value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} />
-          <Select label={t('category')} value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
+          <Input label={t('name')} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t('placeholderAssetName')} disabled={fromInventory} />
+          <Input label={t('assetTag')} value={form.asset_tag} onChange={(e) => setForm({ ...form, asset_tag: e.target.value })} placeholder={t('autoGenerated')} disabled={fromInventory} />
+          <Input label={t('serial')} value={form.serial} onChange={(e) => setForm({ ...form, serial: e.target.value })} disabled={fromInventory} />
+          <Input label={t('model')} value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} disabled={fromInventory} />
+          <Select label={t('category')} value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })} disabled={fromInventory}>
             <option value="">{t('none')}</option>
             {categories.filter((c) => c.type === 'asset').map((c) => <option key={c.id} value={c.id}>{tn(c.name)}</option>)}
           </Select>
-          <Select label={t('manufacturer')} value={form.manufacturer_id} onChange={(e) => setForm({ ...form, manufacturer_id: e.target.value })}>
+          <Select label={t('manufacturer')} value={form.manufacturer_id} onChange={(e) => setForm({ ...form, manufacturer_id: e.target.value })} disabled={fromInventory}>
             <option value="">{t('none')}</option>
             {manufacturers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
           </Select>

@@ -18,13 +18,16 @@ interface Props {
   canDelete?: boolean;
 }
 
-export default function AssetDetail({ assetId, navigate, onRefresh, users, canManage = false, canDelete = false }: Props) {
+export default function AssetDetail({ assetId, navigate, onRefresh, users, locations, canManage = false, canDelete = false }: Props) {
   const { t, tn, lang } = useI18n();
   const [asset, setAsset] = useState<Asset | null>(null);
   const [history, setHistory] = useState<CheckoutHistory[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCheckout, setShowCheckout] = useState(false);
   const [checkoutUser, setCheckoutUser] = useState('');
+  const [showCheckin, setShowCheckin] = useState(false);
+  const [checkinLocationId, setCheckinLocationId] = useState('');
+  const [checkingIn, setCheckingIn] = useState(false);
 
   const fetchAsset = async () => {
     const { data } = await supabase
@@ -68,23 +71,33 @@ export default function AssetDetail({ assetId, navigate, onRefresh, users, canMa
   };
 
   const handleCheckin = async () => {
-    if (!canManage || !asset || !isAssetDeployed(asset)) return;
-    const assignee = getAssetAssignee(asset);
-    await insertCheckoutHistory({
-      asset_id: asset.id,
-      assigned_to_id: asset.assigned_to_id,
-      action: 'checkin',
-      note: assignee ? `${t('checkedIn')} — ${assignee.name}${assignee.email ? ` (${assignee.email})` : ''}` : t('checkedIn'),
-    });
-    await supabase.from('assets').update({
-      assigned_to_id: null,
-      assignee_name: null,
-      assignee_email: null,
-      status: 'ready',
-    }).eq('id', asset.id);
-    fetchAsset();
-    fetchHistory();
-    onRefresh();
+    if (!canManage || !asset || !isAssetDeployed(asset) || !checkinLocationId) return;
+    setCheckingIn(true);
+    try {
+      const assignee = getAssetAssignee(asset);
+      const locName = locations.find((l) => l.id === checkinLocationId)?.name || '';
+      const noteBase = assignee ? `${t('checkedIn')} — ${assignee.name}${assignee.email ? ` (${assignee.email})` : ''}` : t('checkedIn');
+      await insertCheckoutHistory({
+        asset_id: asset.id,
+        assigned_to_id: asset.assigned_to_id,
+        action: 'checkin',
+        note: locName ? `${noteBase} → ${locName}` : noteBase,
+      });
+      await supabase.from('assets').update({
+        assigned_to_id: null,
+        assignee_name: null,
+        assignee_email: null,
+        status: 'ready',
+        default_location_id: checkinLocationId,
+      }).eq('id', asset.id);
+      setShowCheckin(false);
+      setCheckinLocationId('');
+      fetchAsset();
+      fetchHistory();
+      onRefresh();
+    } finally {
+      setCheckingIn(false);
+    }
   };
 
   const handleDelete = async () => {
@@ -281,7 +294,10 @@ ${hasAssignee ? `<div class="section"><h2>${t('assignedToInfo')}</h2><table clas
             <div className="flex flex-wrap gap-2">
               {canManage && (
                 isAssetDeployed(asset) ? (
-                  <Button onClick={handleCheckin}><ArrowRightLeft className="w-4 h-4" /> {t('checkIn')}</Button>
+                  <Button onClick={() => {
+                    setCheckinLocationId(asset.default_location_id || '');
+                    setShowCheckin(true);
+                  }}><ArrowRightLeft className="w-4 h-4" /> {t('checkIn')}</Button>
                 ) : (
                   <Button onClick={() => setShowCheckout(true)}><ArrowRightLeft className="w-4 h-4" /> {t('checkOut')}</Button>
                 )
@@ -375,6 +391,35 @@ ${hasAssignee ? `<div class="section"><h2>${t('assignedToInfo')}</h2><table clas
           <option value="">{t('selectUser')}</option>
           {users.map((u) => <option key={u.id} value={u.id}>{u.first_name} {u.last_name} — {tn(u.job_title) || t('employee')}</option>)}
         </Select>
+      </Modal>
+
+      <Modal
+        open={canManage && showCheckin}
+        onClose={() => { if (!checkingIn) { setShowCheckin(false); setCheckinLocationId(''); } }}
+        title={t('checkInConfirmTitle')}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => { setShowCheckin(false); setCheckinLocationId(''); }} disabled={checkingIn}>{t('cancel')}</Button>
+            <Button onClick={handleCheckin} disabled={checkingIn || !checkinLocationId}>
+              {checkingIn ? t('saving') : t('checkIn')}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">{t('checkInConfirmMsg', { name: getAssetDisplayName(asset) })}</p>
+          <Select
+            label={`${t('checkInLocation')} *`}
+            value={checkinLocationId}
+            onChange={(e) => setCheckinLocationId(e.target.value)}
+          >
+            <option value="">{t('selectLocation')}</option>
+            {locations.map((l) => (
+              <option key={l.id} value={l.id}>{tn(l.name)}</option>
+            ))}
+          </Select>
+        </div>
       </Modal>
     </div>
   );

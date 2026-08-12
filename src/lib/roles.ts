@@ -9,6 +9,7 @@ export type AppPageName =
   | 'locations'
   | 'categories'
   | 'manufacturers'
+  | 'assets'
   | 'accessories'
   | 'consumables'
   | 'licenses'

@@ -12,7 +12,7 @@ export const DEFAULT_STOCK_ALERT_SETTINGS: StockAlertSettings = {
   enabled: false,
   emails: [],
   webhook_url: '',
-  from_email: 'Stok Uyarı <onboarding@resend.dev>',
+  from_email: 'envanter@e-final.com',
   cooldown_hours: 24,
 };
 

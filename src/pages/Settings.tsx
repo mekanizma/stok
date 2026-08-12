@@ -51,9 +51,10 @@ export default function SettingsPage({ canConfigureAlerts = false }: Props) {
         const st = await invokeStockAlert('status').catch(() => null);
         if (mounted && st) {
           const parts = [
-            st.hasResendKey ? t('stockAlertResendReady') : t('stockAlertResendMissing'),
+            (st.hasSmtp || st.hasResendKey) ? t('stockAlertResendReady') : t('stockAlertResendMissing'),
+            st.smtpHost ? String(st.smtpHost) : null,
             t('stockAlertCriticalCount', { count: Number(st.criticalCount || 0) }),
-          ];
+          ].filter(Boolean);
           setStatusInfo(parts.join(' · '));
         }
       } catch (e) {
@@ -179,7 +180,7 @@ export default function SettingsPage({ canConfigureAlerts = false }: Props) {
                   label={t('stockAlertFrom')}
                   value={settings.from_email}
                   onChange={(e) => setSettings({ ...settings, from_email: e.target.value })}
-                  placeholder="Stok Uyarı <onboarding@resend.dev>"
+                  placeholder="envanter@e-final.com"
                 />
 
                 <Input

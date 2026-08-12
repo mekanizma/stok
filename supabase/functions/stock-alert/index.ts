@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
+import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -69,6 +70,79 @@ function buildEmailHtml(items: CriticalItem[]) {
   </div>`;
 }
 
+function smtpConfigured() {
+  return Boolean(
+    Deno.env.get('SMTP_HOST')?.trim() &&
+    Deno.env.get('SMTP_USER')?.trim() &&
+    Deno.env.get('SMTP_PASS')?.trim(),
+  );
+}
+
+function parseFrom(from: string) {
+  const raw = (from || '').trim();
+  const m = raw.match(/^(.*)<([^>]+)>\s*$/);
+  if (m) {
+    const email = m[2].trim();
+    const name = m[1].trim().replace(/^["']|["']$/g, '');
+    return { name: name || undefined, email };
+  }
+  // Plain email or anything containing an email
+  const emailOnly = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return { email: (emailOnly?.[0] || raw).trim() };
+}
+
+function isValidEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+async function sendSmtp(opts: {
+  from: string;
+  to: string[];
+  subject: string;
+  html: string;
+}) {
+  const host = Deno.env.get('SMTP_HOST')?.trim() || '';
+  const port = Number(Deno.env.get('SMTP_PORT') || 465);
+  const user = Deno.env.get('SMTP_USER')?.trim() || '';
+  const pass = Deno.env.get('SMTP_PASS') || '';
+  if (!host || !user || !pass) {
+    throw new Error('SMTP secrets eksik (SMTP_HOST / SMTP_USER / SMTP_PASS).');
+  }
+
+  // Turhost: From must be the authenticated mailbox (envanter@e-final.com)
+  const parsed = parseFrom(opts.from);
+  const fromEmail = isValidEmail(user) ? user : parsed.email;
+  if (!isValidEmail(fromEmail)) {
+    throw new Error(`Geçersiz From adresi: ${fromEmail || '(boş)'}. Ayarlarda yalnızca e-posta yazın (örn. envanter@e-final.com).`);
+  }
+
+  const client = new SMTPClient({
+    connection: {
+      hostname: host,
+      port,
+      tls: true,
+      auth: { username: user, password: pass },
+    },
+  });
+
+  try {
+    await client.send({
+      from: fromEmail,
+      to: opts.to,
+      subject: opts.subject,
+      content: 'auto',
+      html: opts.html,
+    });
+    return { ok: true, provider: 'smtp', host, from: fromEmail, to: opts.to };
+  } finally {
+    try {
+      await client.close();
+    } catch {
+      // ignore close errors
+    }
+  }
+}
+
 async function sendResend(opts: {
   apiKey: string;
   from: string;
@@ -97,6 +171,30 @@ async function sendResend(opts: {
   return body;
 }
 
+async function sendMail(opts: {
+  from: string;
+  to: string[];
+  subject: string;
+  html: string;
+  resendKey: string;
+}) {
+  if (smtpConfigured()) {
+    return { smtp: await sendSmtp(opts) };
+  }
+  if (opts.resendKey) {
+    return {
+      resend: await sendResend({
+        apiKey: opts.resendKey,
+        from: opts.from,
+        to: opts.to,
+        subject: opts.subject,
+        html: opts.html,
+      }),
+    };
+  }
+  throw new Error('E-posta için SMTP (SMTP_HOST/USER/PASS) veya RESEND_API_KEY tanımlayın.');
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -107,6 +205,7 @@ Deno.serve(async (req) => {
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || Deno.env.get('SUPABASE_PUBLISHABLE_KEY') || '';
     const resendKey = Deno.env.get('RESEND_API_KEY') || '';
+    const hasSmtp = smtpConfigured();
 
     if (!supabaseUrl || !serviceKey || !anonKey) {
       return json({ error: 'Supabase ortam değişkenleri eksik (URL / ANON / SERVICE_ROLE).' }, 500);
@@ -137,11 +236,12 @@ Deno.serve(async (req) => {
     if (settingErr) throw settingErr;
 
     const raw = (settingRow?.value || {}) as Record<string, unknown>;
+    const defaultFrom = Deno.env.get('SMTP_USER')?.trim() || 'envanter@e-final.com';
     const settings: StockAlertSettings = {
       enabled: Boolean(raw.enabled),
       emails: parseEmails(raw.emails),
       webhook_url: String(raw.webhook_url || '').trim(),
-      from_email: String(raw.from_email || 'Stok Uyarı <onboarding@resend.dev>'),
+      from_email: String(raw.from_email || defaultFrom),
       cooldown_hours: Number(raw.cooldown_hours || 24),
     };
 
@@ -154,7 +254,9 @@ Deno.serve(async (req) => {
         enabled: settings.enabled,
         emailCount: settings.emails.length,
         hasWebhook: Boolean(settings.webhook_url),
+        hasSmtp,
         hasResendKey: Boolean(resendKey),
+        smtpHost: hasSmtp ? (Deno.env.get('SMTP_HOST') || '') : '',
         criticalCount: critical.length,
         critical,
       });
@@ -177,16 +279,13 @@ Deno.serve(async (req) => {
 
       const results: Record<string, unknown> = {};
       if (settings.emails.length) {
-        if (!resendKey) {
-          return json({ error: 'RESEND_API_KEY Edge Function secret olarak eklenmeli.' }, 400);
-        }
-        results.resend = await sendResend({
-          apiKey: resendKey,
+        Object.assign(results, await sendMail({
           from: settings.from_email,
           to: settings.emails,
           subject: `[TEST] Kritik Stok Uyarısı (${sample.length})`,
           html: buildEmailHtml(sample),
-        });
+          resendKey,
+        }));
       }
       if (settings.webhook_url) {
         const wh = await fetch(settings.webhook_url, {
@@ -234,16 +333,13 @@ Deno.serve(async (req) => {
 
     const results: Record<string, unknown> = {};
     if (settings.emails.length) {
-      if (!resendKey) {
-        return json({ error: 'RESEND_API_KEY Edge Function secret olarak eklenmeli.' }, 400);
-      }
-      results.resend = await sendResend({
-        apiKey: resendKey,
+      Object.assign(results, await sendMail({
         from: settings.from_email,
         to: settings.emails,
         subject: `Kritik Stok Uyarısı (${toNotify.length} kalem)`,
         html: buildEmailHtml(toNotify),
-      });
+        resendKey,
+      }));
     }
     if (settings.webhook_url) {
       const wh = await fetch(settings.webhook_url, {

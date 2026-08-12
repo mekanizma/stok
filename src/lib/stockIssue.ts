@@ -24,6 +24,12 @@ export async function issueStock(opts: {
   givenTo: string;
   assignedToId?: string | null;
   note?: string;
+  /** When accessory is issued, also create a deployed asset so it appears under Zimmetli. */
+  itemName?: string;
+  categoryId?: string | null;
+  manufacturerId?: string | null;
+  locationId?: string | null;
+  serial?: string | null;
 }) {
   const qty = Math.max(1, Math.floor(opts.qty));
   if (qty > opts.remaining) {
@@ -52,6 +58,51 @@ export async function issueStock(opts: {
     note: extra || null,
   });
   if (histError) throw histError;
+
+  // Aksesuar verilişi → zimmetli listesinde görünsün
+  if (opts.kind === 'accessory') {
+    const stamp = Date.now().toString(36).toUpperCase();
+    const tag = `ACC-${stamp}`;
+    const name = (opts.itemName || 'Aksesuar').trim();
+    const noteLine = [
+      `Aksesuar zimmeti`,
+      qty > 1 ? `${qty} adet` : null,
+      extra || null,
+    ].filter(Boolean).join(' · ');
+
+    const { data: created, error: assetError } = await supabase
+      .from('assets')
+      .insert({
+        asset_tag: tag,
+        name,
+        serial: opts.serial?.trim() || null,
+        model: null,
+        manufacturer_id: opts.manufacturerId || null,
+        category_id: opts.categoryId || null,
+        default_location_id: opts.locationId || null,
+        status: 'deployed',
+        assigned_to_id: opts.assignedToId || null,
+        assignee_name: givenTo,
+        assignee_email: null,
+        notes: noteLine,
+      })
+      .select('id')
+      .single();
+
+    if (assetError) throw assetError;
+
+    if (created?.id) {
+      await insertCheckoutHistory({
+        asset_id: created.id,
+        accessory_id: opts.itemId,
+        assigned_to_id: opts.assignedToId || null,
+        action: 'checkout',
+        qty,
+        given_to: givenTo,
+        note: noteLine,
+      });
+    }
+  }
 
   return nextRemaining;
 }

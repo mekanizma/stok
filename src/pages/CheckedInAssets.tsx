@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import { supabase, type Asset, type CheckoutHistory } from '@/lib/supabase';
-import { Search, PackageCheck, Boxes, ArrowRightLeft } from 'lucide-react';
+import { Search, PackageCheck, Boxes, ArrowRightLeft, Trash2, MapPin } from 'lucide-react';
 import { type Page } from '@/App';
-import { StatusBadge, Button, Modal, Input, PageHeader, EmptyState, Avatar, TablePagination, type PageSize } from '@/components/ui';
+import { StatusBadge, Button, Modal, Input, PageHeader, EmptyState, Avatar, TablePagination, ConfirmDialog, type PageSize } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { isAssetDeployed, getAssetDisplayName } from '@/lib/assetAssignee';
 import { insertCheckoutHistory } from '@/lib/checkoutHistory';
@@ -11,6 +11,7 @@ interface Props {
   assets: Asset[];
   loading: boolean;
   canManage?: boolean;
+  canDelete?: boolean;
   navigate: (p: Page) => void;
   onRefresh: () => void;
 }
@@ -20,7 +21,7 @@ interface ReturnedRow {
   history: CheckoutHistory;
 }
 
-export default function CheckedInAssetsPage({ assets, loading, canManage = false, navigate, onRefresh }: Props) {
+export default function CheckedInAssetsPage({ assets, loading, canManage = false, canDelete = false, navigate, onRefresh }: Props) {
   const { t, tn, lang } = useI18n();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -28,7 +29,9 @@ export default function CheckedInAssetsPage({ assets, loading, canManage = false
   const [history, setHistory] = useState<CheckoutHistory[]>([]);
   const [histLoading, setHistLoading] = useState(true);
   const [checkoutTarget, setCheckoutTarget] = useState<Asset | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Asset | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -59,12 +62,14 @@ export default function CheckedInAssetsPage({ assets, loading, canManage = false
         a.name.toLowerCase().includes(q) ||
         a.asset_tag.toLowerCase().includes(q) ||
         (a.serial || '').toLowerCase().includes(q) ||
+        (a.default_location?.name || '').toLowerCase().includes(q) ||
+        tn(a.default_location?.name).toLowerCase().includes(q) ||
         (h.assigned_to?.first_name || '').toLowerCase().includes(q) ||
         (h.assigned_to?.last_name || '').toLowerCase().includes(q),
       );
     }
     return list;
-  }, [history, assets, search]);
+  }, [history, assets, search, tn]);
 
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -104,7 +109,18 @@ export default function CheckedInAssetsPage({ assets, loading, canManage = false
     onRefresh();
   };
 
+  const handleDelete = async () => {
+    if (!canDelete || !deleteTarget) return;
+    setDeleting(true);
+    await supabase.from('assets').delete().eq('id', deleteTarget.id);
+    setDeleting(false);
+    setDeleteTarget(null);
+    onRefresh();
+  };
+
   const formatDate = (date: string) => new Date(date).toLocaleDateString(lang === 'tr' ? 'tr-TR' : 'en-US');
+
+  const locationLabel = (a: Asset) => tn(a.default_location?.name) || a.default_location?.name || '—';
 
   if (loading || histLoading) {
     return (
@@ -150,7 +166,8 @@ export default function CheckedInAssetsPage({ assets, loading, canManage = false
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('asset')}</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">{t('assetTag')}</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('returnedBy')}</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('location')}</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden lg:table-cell">{t('returnedBy')}</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden lg:table-cell">{t('returnedAt')}</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('status')}</th>
                   <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('actions')}</th>
@@ -176,6 +193,12 @@ export default function CheckedInAssetsPage({ assets, loading, canManage = false
                       </span>
                     </td>
                     <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5 min-w-0 text-sm text-gray-700">
+                        <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                        <span className="truncate">{locationLabel(a)}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 hidden lg:table-cell">
                       {h.assigned_to ? (
                         <div className="flex items-center gap-2">
                           <Avatar name={`${h.assigned_to.first_name} ${h.assigned_to.last_name || ''}`} size="sm" />
@@ -195,14 +218,25 @@ export default function CheckedInAssetsPage({ assets, loading, canManage = false
                       <StatusBadge status={a.status} />
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center justify-end">
+                      <div className="flex items-center justify-end gap-1">
                         {canManage ? (
                           <Button size="sm" onClick={() => setCheckoutTarget(a)}>
                             <ArrowRightLeft className="w-3.5 h-3.5" /> {t('checkOut')}
                           </Button>
-                        ) : (
+                        ) : null}
+                        {canDelete ? (
+                          <button
+                            type="button"
+                            onClick={() => setDeleteTarget(a)}
+                            title={t('delete')}
+                            className="p-1.5 rounded-lg hover:bg-red-50 text-gray-500 hover:text-red-600 transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        ) : null}
+                        {!canManage && !canDelete ? (
                           <span className="text-xs text-gray-400">—</span>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -228,6 +262,16 @@ export default function CheckedInAssetsPage({ assets, loading, canManage = false
           onSave={handleCheckout}
         />
       )}
+
+      <ConfirmDialog
+        open={canDelete && !!deleteTarget}
+        onClose={() => { if (!deleting) setDeleteTarget(null); }}
+        onConfirm={() => { void handleDelete(); }}
+        title={t('deleteAsset')}
+        message={t('deleteAssetConfirm', { name: getAssetDisplayName(deleteTarget) })}
+        confirmLabel={deleting ? t('saving') : t('delete')}
+        confirmVariant="danger"
+      />
     </div>
   );
 }

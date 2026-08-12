@@ -87,14 +87,17 @@ export interface Asset {
 export interface Accessory {
   id: string;
   name: string;
+  serial: string | null;
   manufacturer_id: string | null;
   category_id: string | null;
+  location_id: string | null;
   qty: number;
   remaining_qty: number;
   min_qty: number;
   created_at: string;
   manufacturer?: Manufacturer | null;
   category?: Category | null;
+  location?: Location | null;
 }
 
 export interface Consumable {

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { type Session } from '@supabase/supabase-js';
 import { supabase, type Asset, type UserRecord, type Category, type Manufacturer, type Location, type Accessory, type Consumable, type License } from '@/lib/supabase';
 import { useI18n, type TranslationKey } from '@/lib/i18n';
-import { LayoutDashboard, Users, MapPin, Tags, Building2, Settings, Package, KeyRound, PackageCheck, ScrollText, Menu, X, Globe, ClipboardCheck, ArchiveRestore, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, MapPin, Tags, Building2, Settings, Package, KeyRound, PackageCheck, ScrollText, Menu, X, Globe, ClipboardCheck, ArchiveRestore, LogOut, Monitor } from 'lucide-react';
 import { Button, Input, Modal } from '@/components/ui';
 import {
   adminDisplayName,
@@ -15,6 +15,7 @@ import UsersPage from '@/pages/Users';
 import LocationsPage from '@/pages/Locations';
 import CategoriesPage from '@/pages/Categories';
 import ManufacturersPage from '@/pages/Manufacturers';
+import AssetsPage from '@/pages/Assets';
 import AccessoriesPage from '@/pages/Accessories';
 import ConsumablesPage from '@/pages/Consumables';
 import LicensesPage from '@/pages/Licenses';
@@ -50,6 +51,7 @@ export type Page =
   | { name: 'locations' }
   | { name: 'categories' }
   | { name: 'manufacturers' }
+  | { name: 'assets' }
   | { name: 'accessories' }
   | { name: 'consumables' }
   | { name: 'licenses' }
@@ -67,6 +69,7 @@ const NAV_ITEMS: NavItem[] = [
   { labelKey: 'dashboard', icon: LayoutDashboard, page: 'dashboard', group: 'overview' },
   { labelKey: 'deployedAssets', icon: ClipboardCheck, page: 'deployed-assets', group: 'inventory' },
   { labelKey: 'checkedInAssets', icon: ArchiveRestore, page: 'checked-in-assets', group: 'inventory' },
+  { labelKey: 'assets', icon: Monitor, page: 'assets', group: 'inventory' },
   { labelKey: 'accessories', icon: Package, page: 'accessories', group: 'inventory' },
   { labelKey: 'consumables', icon: PackageCheck, page: 'consumables', group: 'inventory' },
   { labelKey: 'licenses', icon: KeyRound, page: 'licenses', group: 'inventory' },
@@ -142,7 +145,7 @@ export default function App() {
   const fetchAccessories = useCallback(async () => {
     const { data } = await supabase
       .from('accessories')
-      .select('*, manufacturer:manufacturers(*), category:categories(*)')
+      .select('*, manufacturer:manufacturers(*), category:categories(*), location:locations(*)')
       .order('created_at', { ascending: false });
     setAccessories((data as Accessory[]) || []);
   }, []);
@@ -336,21 +339,26 @@ export default function App() {
     setPage({ name: 'dashboard' });
   };
 
-  const handleCheckinFromList = async (asset: Asset) => {
+  const handleCheckinFromList = async (asset: Asset, locationId?: string | null) => {
     const assigneeNote = asset.assignee_name
       ? `${asset.assignee_name}${asset.assignee_email ? ` (${asset.assignee_email})` : ''}`
       : null;
+    const locName = locationId
+      ? locations.find((l) => l.id === locationId)?.name
+      : null;
+    const noteBase = assigneeNote ? `${t('checkedInFromDeployed')} — ${assigneeNote}` : t('checkedInFromDeployed');
     await insertCheckoutHistory({
       asset_id: asset.id,
       assigned_to_id: asset.assigned_to_id,
       action: 'checkin',
-      note: assigneeNote ? `${t('checkedInFromDeployed')} — ${assigneeNote}` : t('checkedInFromDeployed'),
+      note: locName ? `${noteBase} → ${locName}` : noteBase,
     });
     await supabase.from('assets').update({
       assigned_to_id: null,
       assignee_name: null,
       assignee_email: null,
       status: 'ready',
+      default_location_id: locationId || null,
     }).eq('id', asset.id);
     fetchAssets();
   };
@@ -376,6 +384,7 @@ export default function App() {
         return (
           <DeployedAssetsPage
             assets={assets}
+            accessories={accessories}
             categories={categories}
             manufacturers={manufacturers}
             locations={locations}
@@ -387,6 +396,7 @@ export default function App() {
             onCheckin={handleCheckinFromList}
             onRefresh={() => {
               fetchAssets();
+              fetchAccessories();
               fetchUsers();
               fetchCategories();
               fetchManufacturers();
@@ -395,7 +405,7 @@ export default function App() {
           />
         );
       case 'checked-in-assets':
-        return <CheckedInAssetsPage assets={assets} loading={loading} canManage={canManageZimmet(appRole)} navigate={navigate} onRefresh={() => { fetchAssets(); fetchUsers(); }} />;
+        return <CheckedInAssetsPage assets={assets} loading={loading} canManage={canManageZimmet(appRole)} canDelete={canDeleteRecords(appRole)} navigate={navigate} onRefresh={() => { fetchAssets(); fetchUsers(); }} />;
       case 'asset-detail':
         return <AssetDetail assetId={page.id} navigate={navigate} onRefresh={fetchAssets} users={users} locations={locations} canManage={canManageZimmet(appRole)} canDelete={canDeleteRecords(appRole)} />;
       case 'users':
@@ -406,8 +416,30 @@ export default function App() {
         return <CategoriesPage categories={categories} assets={assets} onRefresh={fetchCategories} canDelete={canDeleteRecords(appRole)} />;
       case 'manufacturers':
         return <ManufacturersPage manufacturers={manufacturers} assets={assets} onRefresh={fetchManufacturers} canDelete={canDeleteRecords(appRole)} />;
+      case 'assets':
+        return (
+          <AssetsPage
+            assets={assets}
+            loading={loading}
+            categories={categories}
+            manufacturers={manufacturers}
+            locations={locations}
+            onRefresh={fetchAssets}
+            canDelete={canDeleteRecords(appRole)}
+          />
+        );
       case 'accessories':
-        return <AccessoriesPage accessories={accessories} categories={categories} manufacturers={manufacturers} users={users} locations={locations} onRefresh={fetchAccessories} canDelete={canDeleteRecords(appRole)} />;
+        return (
+          <AccessoriesPage
+            accessories={accessories}
+            categories={categories}
+            manufacturers={manufacturers}
+            users={users}
+            locations={locations}
+            onRefresh={() => { fetchAccessories(); fetchAssets(); }}
+            canDelete={canDeleteRecords(appRole)}
+          />
+        );
       case 'consumables':
         return <ConsumablesPage consumables={consumables} categories={categories} manufacturers={manufacturers} users={users} locations={locations} onRefresh={fetchConsumables} canDelete={canDeleteRecords(appRole)} />;
       case 'licenses':

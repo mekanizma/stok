@@ -61,9 +61,12 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
     if (!q) return accessories;
     return accessories.filter((a) =>
       a.name.toLowerCase().includes(q) ||
+      (a.serial || '').toLowerCase().includes(q) ||
       (a.manufacturer?.name || '').toLowerCase().includes(q) ||
       (a.category?.name || '').toLowerCase().includes(q) ||
-      tn(a.category?.name).toLowerCase().includes(q),
+      (a.location?.name || '').toLowerCase().includes(q) ||
+      tn(a.category?.name).toLowerCase().includes(q) ||
+      tn(a.location?.name).toLowerCase().includes(q),
     );
   }, [accessories, search, tn]);
 
@@ -83,14 +86,22 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
     if (editing) {
       const remaining = Math.min(qty, Math.max(0, parseInt(String(data.remaining_qty), 10) || 0));
       await supabase.from('accessories').update({
-        name: data.name, manufacturer_id: data.manufacturer_id || null,
-        category_id: data.category_id || null, qty, min_qty: minQty,
+        name: data.name,
+        serial: data.serial?.trim() || null,
+        manufacturer_id: data.manufacturer_id || null,
+        category_id: data.category_id || null,
+        location_id: data.location_id || null,
+        qty, min_qty: minQty,
         remaining_qty: remaining,
       }).eq('id', editing.id);
     } else {
       await supabase.from('accessories').insert({
-        name: data.name, manufacturer_id: data.manufacturer_id || null,
-        category_id: data.category_id || null, qty, remaining_qty: qty, min_qty: minQty,
+        name: data.name,
+        serial: data.serial?.trim() || null,
+        manufacturer_id: data.manufacturer_id || null,
+        category_id: data.category_id || null,
+        location_id: data.location_id || null,
+        qty, remaining_qty: qty, min_qty: minQty,
       });
     }
     setSaving(false);
@@ -119,6 +130,11 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
         givenTo: opts.givenTo,
         assignedToId: opts.assignedToId,
         note: opts.note,
+        itemName: issueTarget.name,
+        categoryId: issueTarget.category_id,
+        manufacturerId: issueTarget.manufacturer_id,
+        locationId: issueTarget.location_id,
+        serial: issueTarget.serial,
       });
       setIssueTarget(null);
       onRefresh();
@@ -223,8 +239,20 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
                       {a.manufacturer?.name || '—'}
                       <span className="mx-1 text-gray-300">·</span>
                       {tn(a.category?.name) || '—'}
+                      {a.location?.name ? (
+                        <>
+                          <span className="mx-1 text-gray-300">·</span>
+                          {tn(a.location.name)}
+                        </>
+                      ) : null}
                     </p>
                   </div>
+                  {a.serial ? (
+                    <p className="mt-1 text-[11px] text-gray-500 truncate">
+                      <span className="text-gray-400">{t('serial')}: </span>
+                      <span className="font-mono text-gray-700">{a.serial}</span>
+                    </p>
+                  ) : null}
                   <div className="mt-3 grid grid-cols-3 gap-1">
                     <div className="rounded-lg bg-slate-50 py-1.5 text-center">
                       <p className="text-[9px] uppercase tracking-wide text-gray-400">{t('inStock')}</p>
@@ -269,7 +297,15 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
       )}
 
       {showForm && (
-        <AccessoryForm accessory={editing} categories={categories} manufacturers={manufacturers} onClose={() => { setShowForm(false); setEditing(null); }} onSave={handleSave} saving={saving} />
+        <AccessoryForm
+          accessory={editing}
+          categories={categories}
+          manufacturers={manufacturers}
+          locations={locations}
+          onClose={() => { setShowForm(false); setEditing(null); }}
+          onSave={handleSave}
+          saving={saving}
+        />
       )}
 
       <ConfirmDialog
@@ -298,10 +334,11 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
   );
 }
 
-function AccessoryForm({ accessory, categories, manufacturers, onClose, onSave, saving }: {
+function AccessoryForm({ accessory, categories, manufacturers, locations, onClose, onSave, saving }: {
   accessory: Accessory | null;
   categories: Category[];
   manufacturers: Manufacturer[];
+  locations: Location[];
   onClose: () => void;
   onSave: (data: Record<string, string>) => void;
   saving: boolean;
@@ -309,8 +346,10 @@ function AccessoryForm({ accessory, categories, manufacturers, onClose, onSave, 
   const { t, tn } = useI18n();
   const [form, setForm] = useState({
     name: accessory?.name || '',
+    serial: accessory?.serial || '',
     manufacturer_id: accessory?.manufacturer_id || '',
     category_id: accessory?.category_id || '',
+    location_id: accessory?.location_id || '',
     qty: accessory ? String(accessory.qty) : '1',
     remaining_qty: accessory ? String(accessory.remaining_qty) : '1',
     min_qty: accessory ? String(accessory.min_qty ?? 1) : '1',
@@ -330,6 +369,7 @@ function AccessoryForm({ accessory, categories, manufacturers, onClose, onSave, 
     >
       <div className="space-y-4">
         <Input label={`${t('name')} *`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t('placeholderAccessoryName')} required />
+        <Input label={`${t('serial')} (${t('serialOptional')})`} value={form.serial} onChange={(e) => setForm({ ...form, serial: e.target.value })} placeholder={t('serialOptional')} />
         <Select label={t('manufacturer')} value={form.manufacturer_id} onChange={(e) => setForm({ ...form, manufacturer_id: e.target.value })}>
           <option value="">{t('none')}</option>
           {manufacturers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -337,6 +377,10 @@ function AccessoryForm({ accessory, categories, manufacturers, onClose, onSave, 
         <Select label={t('category')} value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
           <option value="">{t('none')}</option>
           {categories.map((c) => <option key={c.id} value={c.id}>{tn(c.name)}</option>)}
+        </Select>
+        <Select label={t('location')} value={form.location_id} onChange={(e) => setForm({ ...form, location_id: e.target.value })}>
+          <option value="">{t('none')}</option>
+          {locations.map((l) => <option key={l.id} value={l.id}>{tn(l.name)}</option>)}
         </Select>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Input label={t('quantity')} type="number" min="1" value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })} />
