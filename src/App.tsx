@@ -24,7 +24,7 @@ import DeployedAssetsPage from '@/pages/DeployedAssets';
 import CheckedInAssetsPage from '@/pages/CheckedInAssets';
 import LoginPage from '@/pages/Login';
 import ForcePasswordChange from '@/pages/ForcePasswordChange';
-import { getSessionRole, roleFromDb, canAccessPage, defaultPageForRole, canEditDeployedAssets, canManageZimmet, canManageUsers, type AppRole } from '@/lib/roles';
+import { getSessionRole, roleFromDb, canAccessPage, defaultPageForRole, canEditDeployedAssets, canManageZimmet, canManageUsers, canDeleteRecords, type AppRole } from '@/lib/roles';
 import { insertCheckoutHistory } from '@/lib/checkoutHistory';
 
 function profileFromSession(session: Session | null): AdminProfile {
@@ -382,6 +382,7 @@ export default function App() {
             loading={loading}
             canEdit={canEditDeployedAssets(appRole)}
             canManage={canManageZimmet(appRole)}
+            canDelete={canDeleteRecords(appRole)}
             navigate={navigate}
             onCheckin={handleCheckinFromList}
             onRefresh={() => {
@@ -396,21 +397,21 @@ export default function App() {
       case 'checked-in-assets':
         return <CheckedInAssetsPage assets={assets} loading={loading} canManage={canManageZimmet(appRole)} navigate={navigate} onRefresh={() => { fetchAssets(); fetchUsers(); }} />;
       case 'asset-detail':
-        return <AssetDetail assetId={page.id} navigate={navigate} onRefresh={fetchAssets} users={users} locations={locations} canManage={canManageZimmet(appRole)} />;
+        return <AssetDetail assetId={page.id} navigate={navigate} onRefresh={fetchAssets} users={users} locations={locations} canManage={canManageZimmet(appRole)} canDelete={canDeleteRecords(appRole)} />;
       case 'users':
         return <UsersPage users={users} locations={locations} assets={assets} onRefresh={fetchUsers} />;
       case 'locations':
         return <LocationsPage locations={locations} assets={assets} users={users} onRefresh={fetchLocations} />;
       case 'categories':
-        return <CategoriesPage categories={categories} assets={assets} onRefresh={fetchCategories} />;
+        return <CategoriesPage categories={categories} assets={assets} onRefresh={fetchCategories} canDelete={canDeleteRecords(appRole)} />;
       case 'manufacturers':
-        return <ManufacturersPage manufacturers={manufacturers} assets={assets} onRefresh={fetchManufacturers} />;
+        return <ManufacturersPage manufacturers={manufacturers} assets={assets} onRefresh={fetchManufacturers} canDelete={canDeleteRecords(appRole)} />;
       case 'accessories':
-        return <AccessoriesPage accessories={accessories} categories={categories} manufacturers={manufacturers} onRefresh={fetchAccessories} />;
+        return <AccessoriesPage accessories={accessories} categories={categories} manufacturers={manufacturers} users={users} locations={locations} onRefresh={fetchAccessories} canDelete={canDeleteRecords(appRole)} />;
       case 'consumables':
-        return <ConsumablesPage consumables={consumables} categories={categories} manufacturers={manufacturers} onRefresh={fetchConsumables} />;
+        return <ConsumablesPage consumables={consumables} categories={categories} manufacturers={manufacturers} users={users} locations={locations} onRefresh={fetchConsumables} canDelete={canDeleteRecords(appRole)} />;
       case 'licenses':
-        return <LicensesPage licenses={licenses} categories={categories} manufacturers={manufacturers} onRefresh={fetchLicenses} />;
+        return <LicensesPage licenses={licenses} categories={categories} manufacturers={manufacturers} onRefresh={fetchLicenses} canDelete={canDeleteRecords(appRole)} />;
       case 'activity':
         return <ActivityPage />;
       case 'settings':

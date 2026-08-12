@@ -134,9 +134,13 @@ export interface CheckoutHistory {
   assigned_to_id: string | null;
   action: CheckoutAction;
   note: string | null;
+  qty: number | null;
+  given_to: string | null;
   performed_by_name: string | null;
   performed_by_email: string | null;
   created_at: string;
   asset?: Asset | null;
+  accessory?: Accessory | null;
+  consumable?: Consumable | null;
   assigned_to?: UserRecord | null;
 }

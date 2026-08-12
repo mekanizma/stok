@@ -8,6 +8,8 @@ export type CheckoutHistoryInsert = {
   assigned_to_id?: string | null;
   action: CheckoutAction;
   note?: string | null;
+  qty?: number | null;
+  given_to?: string | null;
 };
 
 async function currentActor() {

@@ -8,9 +8,10 @@ interface Props {
   manufacturers: Manufacturer[];
   assets: Asset[];
   onRefresh: () => void;
+  canDelete?: boolean;
 }
 
-export default function ManufacturersPage({ manufacturers, assets, onRefresh }: Props) {
+export default function ManufacturersPage({ manufacturers, assets, onRefresh, canDelete = false }: Props) {
   const { t } = useI18n();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Manufacturer | null>(null);
@@ -35,6 +36,7 @@ export default function ManufacturersPage({ manufacturers, assets, onRefresh }: 
   };
 
   const handleDelete = async (id: string) => {
+    if (!canDelete) return;
     await supabase.from('manufacturers').delete().eq('id', id);
     onRefresh();
   };
@@ -84,7 +86,9 @@ export default function ManufacturersPage({ manufacturers, assets, onRefresh }: 
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
                       <button onClick={() => { setEditing(m); setShowForm(true); }} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors"><Edit3 className="w-4 h-4" /></button>
-                      <button onClick={() => setDeleteTarget(m)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-500 hover:text-red-600 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                      {canDelete ? (
+                        <button onClick={() => setDeleteTarget(m)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-500 hover:text-red-600 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -99,7 +103,7 @@ export default function ManufacturersPage({ manufacturers, assets, onRefresh }: 
       )}
 
       <ConfirmDialog
-        open={!!deleteTarget}
+        open={canDelete && !!deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
         title={t('deleteManufacturer')}

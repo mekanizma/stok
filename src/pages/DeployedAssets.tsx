@@ -23,6 +23,7 @@ interface Props {
   loading: boolean;
   canEdit?: boolean;
   canManage?: boolean;
+  canDelete?: boolean;
   navigate: (p: Page) => void;
   onCheckin: (asset: Asset) => void;
   onRefresh: () => void;
@@ -59,7 +60,7 @@ async function resolveOrCreateLocation(name: string, existing: Location[]): Prom
 }
 
 export default function DeployedAssetsPage({
-  assets, categories, manufacturers, locations, loading, canEdit = false, canManage = false, navigate, onCheckin, onRefresh,
+  assets, categories, manufacturers, locations, loading, canEdit = false, canManage = false, canDelete = false, navigate, onCheckin, onRefresh,
 }: Props) {
   const { t, tn } = useI18n();
   const [search, setSearch] = useState('');
@@ -325,7 +326,7 @@ export default function DeployedAssetsPage({
   };
 
   const handleDeleteCheckout = async () => {
-    if (!canManage || !deleteTarget) return;
+    if (!canDelete || !deleteTarget) return;
     const targetId = deleteTarget.id;
     setDeleting(true);
     const { error } = await supabase.from('assets').delete().eq('id', targetId);
@@ -507,7 +508,7 @@ export default function DeployedAssetsPage({
                               <ArrowRightLeft className="w-4 h-4" />
                             </button>
                           ) : null}
-                          {canManage ? (
+                          {canDelete ? (
                             <button
                               type="button"
                               onClick={() => setDeleteTarget(a)}
@@ -619,7 +620,7 @@ export default function DeployedAssetsPage({
       />
 
       <ConfirmDialog
-        open={canManage && !!deleteTarget}
+        open={canDelete && !!deleteTarget}
         onClose={() => { if (!deleting) setDeleteTarget(null); }}
         onConfirm={() => { void handleDeleteCheckout(); }}
         title={t('deleteCheckout')}

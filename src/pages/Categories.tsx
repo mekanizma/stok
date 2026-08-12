@@ -8,6 +8,7 @@ interface Props {
   categories: Category[];
   assets: Asset[];
   onRefresh: () => void;
+  canDelete?: boolean;
 }
 
 const TYPE_ICONS: Record<string, typeof Tags> = {
@@ -16,7 +17,7 @@ const TYPE_ICONS: Record<string, typeof Tags> = {
 
 const COLORS = ['blue', 'cyan', 'emerald', 'amber', 'rose', 'violet', 'teal', 'orange', 'pink', 'slate', 'red', 'indigo'];
 
-export default function CategoriesPage({ categories, assets, onRefresh }: Props) {
+export default function CategoriesPage({ categories, assets, onRefresh, canDelete = false }: Props) {
   const { t, tn } = useI18n();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Category | null>(null);
@@ -41,6 +42,7 @@ export default function CategoriesPage({ categories, assets, onRefresh }: Props)
   };
 
   const handleDelete = async (id: string) => {
+    if (!canDelete) return;
     await supabase.from('categories').delete().eq('id', id);
     onRefresh();
   };
@@ -71,9 +73,11 @@ export default function CategoriesPage({ categories, assets, onRefresh }: Props)
                     <button onClick={() => { setEditing(c); setShowForm(true); }} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors">
                       <Edit3 className="w-3.5 h-3.5" />
                     </button>
-                    <button onClick={() => setDeleteTarget(c)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-500 hover:text-red-600 transition-colors">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {canDelete ? (
+                      <button onClick={() => setDeleteTarget(c)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-500 hover:text-red-600 transition-colors">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    ) : null}
                   </div>
                 </div>
                 <h3 className="text-sm font-semibold text-gray-900">{tn(c.name)}</h3>
@@ -92,7 +96,7 @@ export default function CategoriesPage({ categories, assets, onRefresh }: Props)
       )}
 
       <ConfirmDialog
-        open={!!deleteTarget}
+        open={canDelete && !!deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
         title={t('deleteCategory')}

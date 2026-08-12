@@ -1,33 +1,56 @@
-import { useMemo, useState } from 'react';
-import { supabase, type Accessory, type Category, type Manufacturer } from '@/lib/supabase';
+import { useEffect, useMemo, useState } from 'react';
+import { supabase, type Accessory, type Category, type CheckoutHistory, type Location, type Manufacturer, type UserRecord } from '@/lib/supabase';
 import { Plus, Edit3, Trash2, Package, Search, AlertTriangle, Boxes, CheckCircle2 } from 'lucide-react';
-import { Button, Modal, Input, Select, PageHeader, EmptyState, ConfirmDialog } from '@/components/ui';
+import { Button, Modal, Input, Select, PageHeader, EmptyState, ConfirmDialog, TablePagination } from '@/components/ui';
+import { IssueMeta, IssueStockModal } from '@/components/IssueStock';
 import { useI18n } from '@/lib/i18n';
 import { notifyCriticalStock } from '@/lib/stockAlerts';
+import { fetchStockIssues, issueStock } from '@/lib/stockIssue';
 
 interface Props {
   accessories: Accessory[];
   categories: Category[];
   manufacturers: Manufacturer[];
+  users: UserRecord[];
+  locations: Location[];
   onRefresh: () => void;
+  canDelete?: boolean;
 }
 
 function stockMeta(remaining: number, qty: number, minQty: number) {
   const pct = qty > 0 ? (remaining / qty) * 100 : 0;
   const threshold = Math.max(0, minQty);
-  if (remaining <= 0) return { pct, key: 'stockEmpty' as const, chip: 'bg-red-100 text-red-700', bar: 'bg-red-500', ring: 'ring-red-100' };
-  if (remaining <= threshold) return { pct, key: 'stockLow' as const, chip: 'bg-red-50 text-red-700', bar: 'bg-red-500', ring: 'ring-red-100' };
-  if (pct <= 50) return { pct, key: 'stockMedium' as const, chip: 'bg-amber-50 text-amber-700', bar: 'bg-amber-500', ring: 'ring-amber-100' };
-  return { pct, key: 'stockOk' as const, chip: 'bg-emerald-50 text-emerald-700', bar: 'bg-emerald-500', ring: 'ring-emerald-100' };
+  if (remaining <= 0) return { pct, key: 'stockEmpty' as const, chip: 'bg-red-50 text-red-700' };
+  if (remaining <= threshold) return { pct, key: 'stockLow' as const, chip: 'bg-red-50 text-red-700' };
+  if (pct <= 50) return { pct, key: 'stockMedium' as const, chip: 'bg-amber-50 text-amber-700' };
+  return { pct, key: 'stockOk' as const, chip: 'bg-emerald-50 text-emerald-700' };
 }
 
-export default function AccessoriesPage({ accessories, categories, manufacturers, onRefresh }: Props) {
+export default function AccessoriesPage({ accessories, categories, manufacturers, users, locations, onRefresh, canDelete = false }: Props) {
   const { t, tn } = useI18n();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Accessory | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Accessory | null>(null);
+  const [issueTarget, setIssueTarget] = useState<Accessory | null>(null);
+  const [issues, setIssues] = useState<CheckoutHistory[]>([]);
   const [saving, setSaving] = useState(false);
+  const [issuing, setIssuing] = useState(false);
+  const [issueError, setIssueError] = useState('');
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const pageSize = 12;
+
+  const loadIssues = async () => {
+    try {
+      setIssues(await fetchStockIssues('accessory'));
+    } catch {
+      setIssues([]);
+    }
+  };
+
+  useEffect(() => {
+    void loadIssues();
+  }, []);
 
   const totalQty = accessories.reduce((s, a) => s + a.qty, 0);
   const totalRemaining = accessories.reduce((s, a) => s + a.remaining_qty, 0);
@@ -43,6 +66,15 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
       tn(a.category?.name).toLowerCase().includes(q),
     );
   }, [accessories, search, tn]);
+
+  useEffect(() => { setPage(1); }, [search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const paged = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, safePage, pageSize]);
 
   const handleSave = async (data: Record<string, string>) => {
     setSaving(true);
@@ -69,8 +101,37 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
   };
 
   const handleDelete = async (id: string) => {
+    if (!canDelete) return;
     await supabase.from('accessories').delete().eq('id', id);
     onRefresh();
+  };
+
+  const handleIssue = async (opts: { qty: number; givenTo: string; assignedToId: string | null; note: string }) => {
+    if (!issueTarget) return;
+    setIssuing(true);
+    setIssueError('');
+    try {
+      await issueStock({
+        kind: 'accessory',
+        itemId: issueTarget.id,
+        remaining: issueTarget.remaining_qty,
+        qty: opts.qty,
+        givenTo: opts.givenTo,
+        assignedToId: opts.assignedToId,
+        note: opts.note,
+      });
+      setIssueTarget(null);
+      onRefresh();
+      await loadIssues();
+      notifyCriticalStock('scan');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === 'not_enough_stock') setIssueError(t('notEnoughStock'));
+      else if (msg === 'given_to_required') setIssueError(t('givenToRequired'));
+      else setIssueError(msg);
+    } finally {
+      setIssuing(false);
+    }
   };
 
   return (
@@ -130,71 +191,81 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
       ) : filtered.length === 0 ? (
         <EmptyState icon={Search} title={t('noResults')} description={t('adjustFilters')} />
       ) : (
-        <div className="space-y-3">
-          {filtered.map((a) => {
+        <>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 p-1 sm:p-2">
+          {paged.map((a) => {
             const meta = stockMeta(a.remaining_qty, a.qty, a.min_qty ?? 1);
             const used = Math.max(0, a.qty - a.remaining_qty);
             return (
-              <div
-                key={a.id}
-                className={`bg-white rounded-2xl border border-gray-200 p-4 sm:p-5 hover:shadow-md transition-shadow ring-1 ${meta.ring}`}
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                  <div className="flex items-start gap-3 flex-1 min-w-0">
-                    <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-cyan-50 text-cyan-600 shrink-0">
-                      <Package className="w-6 h-6" />
+              <div key={a.id} className="magic-card">
+                <div className="magic-card-info">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-amber-50 text-amber-600 shrink-0">
+                      <Package className="w-4 h-4" />
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2 mb-1">
-                        <h3 className="text-base font-semibold text-gray-900 truncate">{a.name}</h3>
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${meta.chip}`}>
-                          {t(meta.key)}
-                        </span>
-                      </div>
-                      <p className="text-sm text-gray-500 truncate">
-                        {a.manufacturer?.name || '—'}
-                        <span className="mx-1.5 text-gray-300">·</span>
-                        {tn(a.category?.name) || '—'}
-                        <span className="mx-1.5 text-gray-300">·</span>
-                        {t('lowStockQty')}: {a.min_qty ?? 1}
-                      </p>
+                    <div className="flex items-center gap-0.5">
+                      <button onClick={() => { setEditing(a); setShowForm(true); }} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-700" title={t('edit')}>
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                      {canDelete ? (
+                        <button onClick={() => setDeleteTarget(a)} className="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-600" title={t('delete')}>
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      ) : null}
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-3 gap-2 sm:gap-4 sm:w-[280px] shrink-0">
-                    <div className="rounded-xl bg-slate-50 px-3 py-2 text-center">
-                      <p className="text-[10px] uppercase tracking-wide text-gray-400 font-medium">{t('inStock')}</p>
-                      <p className="text-lg font-bold text-gray-900">{a.remaining_qty}</p>
+                  <h3 className="magic-card-title mt-2 text-sm truncate capitalize" title={a.name}>{a.name}</h3>
+                  <div className="mt-1 flex items-center gap-1.5 min-w-0">
+                    <span className={`shrink-0 inline-flex items-center px-1.5 py-px rounded-full text-[10px] font-semibold ${meta.chip}`}>
+                      {t(meta.key)}
+                    </span>
+                    <p className="text-[11px] text-gray-500 truncate">
+                      {a.manufacturer?.name || '—'}
+                      <span className="mx-1 text-gray-300">·</span>
+                      {tn(a.category?.name) || '—'}
+                    </p>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-1">
+                    <div className="rounded-lg bg-slate-50 py-1.5 text-center">
+                      <p className="text-[9px] uppercase tracking-wide text-gray-400">{t('inStock')}</p>
+                      <p className="text-sm font-bold text-gray-900 leading-tight">{a.remaining_qty}</p>
                     </div>
-                    <div className="rounded-xl bg-slate-50 px-3 py-2 text-center">
-                      <p className="text-[10px] uppercase tracking-wide text-gray-400 font-medium">{t('used')}</p>
-                      <p className="text-lg font-bold text-gray-900">{used}</p>
+                    <div className="rounded-lg bg-slate-50 py-1.5 text-center">
+                      <p className="text-[9px] uppercase tracking-wide text-gray-400">{t('used')}</p>
+                      <p className="text-sm font-bold text-gray-900 leading-tight">{used}</p>
                     </div>
-                    <div className="rounded-xl bg-slate-50 px-3 py-2 text-center">
-                      <p className="text-[10px] uppercase tracking-wide text-gray-400 font-medium">{t('quantity')}</p>
-                      <p className="text-lg font-bold text-gray-900">{a.qty}</p>
+                    <div className="rounded-lg bg-slate-50 py-1.5 text-center">
+                      <p className="text-[9px] uppercase tracking-wide text-gray-400">{t('quantity')}</p>
+                      <p className="text-sm font-bold text-gray-900 leading-tight">{a.qty}</p>
                     </div>
                   </div>
-
-                  <div className="flex sm:flex-col gap-1 shrink-0 self-end sm:self-center">
-                    <button onClick={() => { setEditing(a); setShowForm(true); }} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors" title={t('edit')}>
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => setDeleteTarget(a)} className="p-2 rounded-lg hover:bg-red-50 text-gray-500 hover:text-red-600 transition-colors" title={t('delete')}>
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                  <div className="h-1 bg-gray-100 rounded-full overflow-hidden mt-3">
+                    <div className="h-full rounded-full" style={{ width: `${Math.min(100, meta.pct)}%`, background: 'linear-gradient(to left, #f7ba2b, #ea5358)' }} />
                   </div>
-                </div>
-
-                <div className="mt-4">
-                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div className={`h-full ${meta.bar} rounded-full transition-all duration-500`} style={{ width: `${Math.min(100, meta.pct)}%` }} />
+                  <div className="mt-auto pt-2">
+                    <IssueMeta
+                      itemName={a.name}
+                      issues={issues.filter((h) => h.accessory_id === a.id)}
+                      onIssue={() => { setIssueError(''); setIssueTarget(a); }}
+                      disabled={a.remaining_qty <= 0}
+                    />
                   </div>
                 </div>
               </div>
             );
           })}
         </div>
+        {filtered.length > pageSize ? (
+          <div className="mt-3 bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <TablePagination
+              page={safePage}
+              pageSize={pageSize}
+              total={filtered.length}
+              onPageChange={setPage}
+            />
+          </div>
+        ) : null}
+        </>
       )}
 
       {showForm && (
@@ -202,11 +273,26 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
       )}
 
       <ConfirmDialog
-        open={!!deleteTarget}
+        open={canDelete && !!deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
         title={t('deleteAccessory')}
         message={t('deleteConfirm', { name: deleteTarget?.name || '' })}
+      />
+
+      <IssueStockModal
+        open={!!issueTarget}
+        kind="accessory"
+        itemId={issueTarget?.id || ''}
+        itemName={issueTarget?.name || ''}
+        remaining={issueTarget?.remaining_qty || 0}
+        users={users}
+        locations={locations}
+        history={issues}
+        saving={issuing}
+        error={issueError}
+        onClose={() => { if (!issuing) setIssueTarget(null); }}
+        onIssue={handleIssue}
       />
     </div>
   );
@@ -250,7 +336,7 @@ function AccessoryForm({ accessory, categories, manufacturers, onClose, onSave, 
         </Select>
         <Select label={t('category')} value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
           <option value="">{t('none')}</option>
-          {categories.filter((c) => c.type === 'accessory').map((c) => <option key={c.id} value={c.id}>{tn(c.name)}</option>)}
+          {categories.map((c) => <option key={c.id} value={c.id}>{tn(c.name)}</option>)}
         </Select>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Input label={t('quantity')} type="number" min="1" value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })} />

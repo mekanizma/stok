@@ -15,9 +15,10 @@ interface Props {
   users: UserRecord[];
   locations: Location[];
   canManage?: boolean;
+  canDelete?: boolean;
 }
 
-export default function AssetDetail({ assetId, navigate, onRefresh, users, canManage = false }: Props) {
+export default function AssetDetail({ assetId, navigate, onRefresh, users, canManage = false, canDelete = false }: Props) {
   const { t, tn, lang } = useI18n();
   const [asset, setAsset] = useState<Asset | null>(null);
   const [history, setHistory] = useState<CheckoutHistory[]>([]);
@@ -87,7 +88,7 @@ export default function AssetDetail({ assetId, navigate, onRefresh, users, canMa
   };
 
   const handleDelete = async () => {
-    if (!canManage || !asset) return;
+    if (!canDelete || !asset) return;
     await supabase.from('assets').delete().eq('id', asset.id);
     onRefresh();
     navigate({ name: asset?.status === 'deployed' ? 'deployed-assets' : 'checked-in-assets' });
@@ -287,7 +288,7 @@ ${hasAssignee ? `<div class="section"><h2>${t('assignedToInfo')}</h2><table clas
               )}
               <Button variant="outline" onClick={generatePDF}><Printer className="w-4 h-4" /> {t('printDocument')}</Button>
               <Button variant="outline" onClick={() => navigate(backPage())}><Edit3 className="w-4 h-4" /> {t('back')}</Button>
-              {canManage ? (
+              {canDelete ? (
                 <Button variant="danger" onClick={handleDelete}><Trash2 className="w-4 h-4" /> {t('delete')}</Button>
               ) : null}
             </div>

@@ -9,9 +9,10 @@ interface Props {
   categories: Category[];
   manufacturers: Manufacturer[];
   onRefresh: () => void;
+  canDelete?: boolean;
 }
 
-export default function LicensesPage({ licenses, categories, manufacturers, onRefresh }: Props) {
+export default function LicensesPage({ licenses, categories, manufacturers, onRefresh, canDelete = false }: Props) {
   const { t, tn, lang } = useI18n();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<License | null>(null);
@@ -41,6 +42,7 @@ export default function LicensesPage({ licenses, categories, manufacturers, onRe
   };
 
   const handleDelete = async (id: string) => {
+    if (!canDelete) return;
     await supabase.from('licenses').delete().eq('id', id);
     onRefresh();
   };
@@ -64,48 +66,51 @@ export default function LicensesPage({ licenses, categories, manufacturers, onRe
       {licenses.length === 0 ? (
         <EmptyState icon={KeyRound} title={t('noLicensesYet')} description={t('addLicensesDesc')} action={<Button onClick={() => setShowForm(true)}><Plus className="w-4 h-4" /> {t('addLicense')}</Button>} />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 p-1 sm:p-2">
           {licenses.map((l) => {
             const pct = l.seats > 0 ? (l.remaining_seats / l.seats) * 100 : 0;
-            const barColor = pct > 50 ? 'bg-emerald-500' : pct > 20 ? 'bg-amber-500' : 'bg-red-500';
             return (
-              <div key={l.id} className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md transition-shadow">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-teal-50 text-teal-600">
-                    <KeyRound className="w-5 h-5" />
-                  </div>
-                  <div className="flex gap-1">
-                    <button onClick={() => { setEditing(l); setShowForm(true); }} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors"><Edit3 className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => setDeleteTarget(l)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-500 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
-                  </div>
-                </div>
-                <h3 className="text-sm font-semibold text-gray-900 mb-1">{tn(l.name)}</h3>
-                <p className="text-xs text-gray-500 mb-3">{l.manufacturer?.name || '—'} · {tn(l.category?.name) || '—'}</p>
-
-                {l.serial && <p className="text-xs font-mono text-gray-400 mb-2 truncate">SN: {l.serial}</p>}
-
-                <div className="mb-3">
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="text-gray-500">{t('seats')}</span>
-                    <span className="font-medium text-gray-700">{l.remaining_seats} / {l.seats} {t('available').toLowerCase()}</span>
-                  </div>
-                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div className={`h-full ${barColor} rounded-full transition-all duration-500`} style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-3 pt-2 border-t border-gray-100 text-xs">
-                  {l.expiration_date && (
-                    <div className={`flex items-center gap-1 ${isExpired(l.expiration_date) ? 'text-red-600' : isExpiringSoon(l.expiration_date) ? 'text-amber-600' : 'text-gray-500'}`}>
-                      <Calendar className="w-3.5 h-3.5" />
-                      {isExpired(l.expiration_date) ? t('expired') : isExpiringSoon(l.expiration_date) ? t('expiringSoon') : new Date(l.expiration_date).toLocaleDateString(lang === 'tr' ? 'tr-TR' : 'en-US')}
+              <div key={l.id} className="magic-card">
+                <div className="magic-card-info">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-amber-50 text-amber-600">
+                      <KeyRound className="w-5 h-5" />
                     </div>
-                  )}
-                  {l.purchase_cost && (
-                    <div className="flex items-center gap-1 text-gray-500">
-                      <DollarSign className="w-3.5 h-3.5" /> ${l.purchase_cost.toLocaleString()}
+                    <div className="flex gap-1">
+                      <button onClick={() => { setEditing(l); setShowForm(true); }} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"><Edit3 className="w-3.5 h-3.5" /></button>
+                      {canDelete ? (
+                        <button onClick={() => setDeleteTarget(l)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                      ) : null}
                     </div>
-                  )}
+                  </div>
+                  <h3 className="magic-card-title text-sm mb-1 truncate capitalize">{tn(l.name)}</h3>
+                  <p className="text-xs text-gray-500 mb-3 truncate">{l.manufacturer?.name || '—'} · {tn(l.category?.name) || '—'}</p>
+
+                  {l.serial && <p className="text-xs font-mono text-gray-400 mb-2 truncate">SN: {l.serial}</p>}
+
+                  <div className="mb-3">
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-gray-500">{t('seats')}</span>
+                      <span className="font-medium text-gray-700">{l.remaining_seats} / {l.seats} {t('available').toLowerCase()}</span>
+                    </div>
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: 'linear-gradient(to left, #f7ba2b, #ea5358)' }} />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3 pt-2 mt-auto border-t border-gray-100 text-xs">
+                    {l.expiration_date && (
+                      <div className={`flex items-center gap-1 ${isExpired(l.expiration_date) ? 'text-red-600' : isExpiringSoon(l.expiration_date) ? 'text-amber-600' : 'text-gray-500'}`}>
+                        <Calendar className="w-3.5 h-3.5" />
+                        {isExpired(l.expiration_date) ? t('expired') : isExpiringSoon(l.expiration_date) ? t('expiringSoon') : new Date(l.expiration_date).toLocaleDateString(lang === 'tr' ? 'tr-TR' : 'en-US')}
+                      </div>
+                    )}
+                    {l.purchase_cost && (
+                      <div className="flex items-center gap-1 text-gray-500">
+                        <DollarSign className="w-3.5 h-3.5" /> ${l.purchase_cost.toLocaleString()}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -118,7 +123,7 @@ export default function LicensesPage({ licenses, categories, manufacturers, onRe
       )}
 
       <ConfirmDialog
-        open={!!deleteTarget}
+        open={canDelete && !!deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
         title={t('deleteLicense')}

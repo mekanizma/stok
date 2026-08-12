@@ -205,7 +205,7 @@ export function TablePagination({
   pageSize: number;
   total: number;
   onPageChange: (page: number) => void;
-  onPageSizeChange: (size: PageSize) => void;
+  onPageSizeChange?: (size: PageSize) => void;
 }) {
   const { t } = useI18n();
   if (total <= 0) return null;
@@ -216,20 +216,22 @@ export function TablePagination({
   const to = Math.min(current * pageSize, total);
 
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-3 py-3 border-t border-gray-200 bg-gray-50/80">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-3 py-3 border-t border-gray-200 bg-gray-50/80 rounded-b-xl">
       <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
-        <label className="inline-flex items-center gap-2">
-          <span className="whitespace-nowrap">{t('rowsPerPage')}</span>
-          <select
-            value={pageSize}
-            onChange={(e) => onPageSizeChange(Number(e.target.value) as PageSize)}
-            className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
-          >
-            {PAGE_SIZE_OPTIONS.map((n) => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-          </select>
-        </label>
+        {onPageSizeChange ? (
+          <label className="inline-flex items-center gap-2">
+            <span className="whitespace-nowrap">{t('rowsPerPage')}</span>
+            <select
+              value={pageSize}
+              onChange={(e) => onPageSizeChange(Number(e.target.value) as PageSize)}
+              className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+            >
+              {PAGE_SIZE_OPTIONS.map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <span className="text-xs sm:text-sm text-gray-500">
           {t('paginationRange', { from, to, total })}
         </span>

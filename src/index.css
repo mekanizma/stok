@@ -74,3 +74,69 @@
 .animate-scale-in {
   animation: scaleIn 0.15s ease-out;
 }
+
+/* Magic card — adapted from Uiverse.io by alexruix */
+.magic-card {
+  --background: linear-gradient(to left, #f7ba2b 0%, #ea5358 100%);
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 210px;
+  padding: 5px;
+  border-radius: 1rem;
+  overflow: visible;
+  background: var(--background);
+}
+
+.magic-card::after {
+  content: "";
+  position: absolute;
+  top: 30px;
+  left: 0;
+  right: 0;
+  z-index: -1;
+  height: 100%;
+  width: 100%;
+  transform: scale(0.8);
+  filter: blur(25px);
+  background: var(--background);
+  transition: opacity 0.5s;
+  pointer-events: none;
+  border-radius: 1rem;
+}
+
+.magic-card-info {
+  background: #ffffff;
+  color: #181818;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  min-height: 200px;
+  overflow: visible;
+  border-radius: 0.7rem;
+  padding: 12px;
+}
+
+.magic-card-title {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #181818;
+  transition: color 1s;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .magic-card:hover {
+    z-index: 2;
+  }
+
+  .magic-card:hover::after {
+    opacity: 0;
+  }
+
+  .magic-card:hover .magic-card-title {
+    color: #f7ba2b;
+  }
+}

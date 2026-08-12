@@ -7,15 +7,22 @@ import { getAssetDisplayName, getAssetAssignee } from '@/lib/assetAssignee';
 import { repairTurkishName } from '@/lib/turkishNames';
 
 function assigneeLabel(h: CheckoutHistory) {
+  if (h.given_to?.trim()) return repairTurkishName(h.given_to.trim());
   if (h.assigned_to) {
     return repairTurkishName(`${h.assigned_to.first_name} ${h.assigned_to.last_name || ''}`.trim());
   }
   const fromAsset = getAssetAssignee(h.asset);
   if (fromAsset?.name) return fromAsset.name;
-  // Fallback: parse "— Name (email)" from note when free-form assignee was used
   const note = h.note || '';
   const m = note.match(/—\s*(.+?)(?:\s*\(|$)/);
   return m?.[1]?.trim() || '';
+}
+
+function itemLabel(h: CheckoutHistory) {
+  if (h.asset) return getAssetDisplayName(h.asset);
+  if (h.accessory?.name) return h.accessory.name;
+  if (h.consumable?.name) return h.consumable.name;
+  return '';
 }
 
 export default function ActivityPage() {
@@ -29,7 +36,7 @@ export default function ActivityPage() {
     (async () => {
       const { data } = await supabase
         .from('checkout_history')
-        .select('*, asset:assets(*, assigned_to:users(*)), assigned_to:users(*)')
+        .select('*, asset:assets(*, assigned_to:users(*)), accessory:accessories(id, name), consumable:consumables(id, name), assigned_to:users(*)')
         .order('created_at', { ascending: false })
         .limit(2000);
       setHistory((data as CheckoutHistory[]) || []);
@@ -75,9 +82,9 @@ export default function ActivityPage() {
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2">
                         <p className="text-sm text-gray-900 min-w-0">
                           <span className="font-medium">{t(h.action as TranslationKey)}</span>
-                          {h.asset && (
-                            <span className="text-gray-500"> — {getAssetDisplayName(h.asset)}</span>
-                          )}
+                          {itemLabel(h) ? (
+                            <span className="text-gray-500"> — {itemLabel(h)}{h.qty ? ` (${h.qty} ${t('pcs')})` : ''}</span>
+                          ) : null}
                         </p>
                         <span className="text-xs text-gray-400 shrink-0">
                           {new Date(h.created_at).toLocaleString(lang === 'tr' ? 'tr-TR' : 'en-US')}

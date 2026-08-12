@@ -67,3 +67,8 @@ export function canEditDeployedAssets(role: AppRole): boolean {
 export function canManageZimmet(role: AppRole): boolean {
   return role === 'admin' || role === 'it';
 }
+
+/** Only admin can delete records. IT cannot delete. */
+export function canDeleteRecords(role: AppRole): boolean {
+  return role === 'admin';
+}
