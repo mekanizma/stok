@@ -117,6 +117,8 @@ export const translations = {
   lost: { tr: 'Kayıp', en: 'Lost' },
   allStatuses: { tr: 'Tüm Durumlar', en: 'All Statuses' },
   allCategories: { tr: 'Tüm Kategoriler', en: 'All Categories' },
+  emptyCategories: { tr: 'Boş kategoriler', en: 'Empty categories' },
+  activeFilter: { tr: 'Aktif filtre', en: 'Active filter' },
 
   // ---- Actions ----
   addAsset: { tr: 'Demirbaş Ekle', en: 'Add Asset' },

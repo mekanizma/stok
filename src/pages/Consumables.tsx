@@ -6,6 +6,7 @@ import { IssueMeta, IssueStockModal } from '@/components/IssueStock';
 import { useI18n } from '@/lib/i18n';
 import { notifyCriticalStock } from '@/lib/stockAlerts';
 import { fetchStockIssues, issueStock } from '@/lib/stockIssue';
+import { InventoryFilterBar } from '@/components/InventoryFilterBar';
 
 interface Props {
   consumables: Consumable[];
@@ -54,10 +55,13 @@ export default function ConsumablesPage({ consumables, categories, manufacturers
   }, []);
 
   const categoryOptions = useMemo(() => {
-    const typed = categories.filter((c) => c.type === 'consumable');
-    const usedIds = new Set(consumables.map((c) => c.category_id).filter(Boolean) as string[]);
-    const extras = categories.filter((c) => usedIds.has(c.id) && c.type !== 'consumable');
-    return [...typed, ...extras].sort((a, b) => tn(a.name).localeCompare(tn(b.name), 'tr'));
+    return [...categories]
+      .map((c) => ({
+        id: c.id,
+        label: tn(c.name),
+        count: consumables.filter((item) => item.category_id === c.id).length,
+      }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'tr'));
   }, [categories, consumables, tn]);
 
   const totalQty = consumables.reduce((s, c) => s + c.qty, 0);
@@ -185,53 +189,14 @@ export default function ConsumablesPage({ consumables, categories, manufacturers
         </div>
       </div>
 
-      <div className="space-y-3 mb-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('searchInventory')}
-            className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
-          />
-        </div>
-        {categoryOptions.length > 0 ? (
-          <div className="flex gap-2 overflow-x-auto scrollbar-thin pb-1 -mx-1 px-1">
-            <button
-              type="button"
-              onClick={() => setCategoryId('')}
-              className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                !categoryId
-                  ? 'bg-brand-600 text-white border-brand-600'
-                  : 'bg-white text-gray-700 border-gray-200 hover:border-brand-300'
-              }`}
-            >
-              {t('allCategories')}
-              <span className={`tabular-nums ${!categoryId ? 'text-brand-100' : 'text-gray-400'}`}>{consumables.length}</span>
-            </button>
-            {categoryOptions.map((c) => {
-              const count = consumables.filter((item) => item.category_id === c.id).length;
-              const active = categoryId === c.id;
-              return (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => setCategoryId(c.id)}
-                  className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                    active
-                      ? 'bg-brand-600 text-white border-brand-600'
-                      : 'bg-white text-gray-700 border-gray-200 hover:border-brand-300'
-                  }`}
-                >
-                  <span className="truncate max-w-[10rem]">{tn(c.name)}</span>
-                  <span className={`tabular-nums ${active ? 'text-brand-100' : 'text-gray-400'}`}>{count}</span>
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-      </div>
+      <InventoryFilterBar
+        search={search}
+        onSearchChange={setSearch}
+        categoryId={categoryId}
+        onCategoryChange={setCategoryId}
+        categories={categoryOptions}
+        totalCount={consumables.length}
+      />
 
       {consumables.length === 0 ? (
         <EmptyState icon={PackageCheck} title={t('noConsumablesYet')} description={t('addConsumablesDesc')} action={<Button onClick={() => setShowForm(true)}><Plus className="w-4 h-4" /> {t('addConsumable')}</Button>} />

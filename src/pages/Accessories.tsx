@@ -8,6 +8,7 @@ import { notifyCriticalStock } from '@/lib/stockAlerts';
 import { fetchStockIssues, issueStock } from '@/lib/stockIssue';
 import { getCurrentActor } from '@/lib/checkoutHistory';
 import { repairTurkishName } from '@/lib/turkishNames';
+import { InventoryFilterBar } from '@/components/InventoryFilterBar';
 
 const DEFAULT_ACCESSORY_CREATOR = 'Bilal Ugurel';
 
@@ -66,8 +67,14 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
   }, []);
 
   const categoryOptions = useMemo(() => {
-    return [...categories].sort((a, b) => tn(a.name).localeCompare(tn(b.name), 'tr'));
-  }, [categories, tn]);
+    return [...categories]
+      .map((c) => ({
+        id: c.id,
+        label: tn(c.name),
+        count: accessories.filter((a) => a.category_id === c.id).length,
+      }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'tr'));
+  }, [categories, accessories, tn]);
 
   const totalQty = accessories.reduce((s, a) => s + a.qty, 0);
   const totalRemaining = accessories.reduce((s, a) => s + a.remaining_qty, 0);
@@ -220,53 +227,14 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
       </div>
 
       {/* Search + category filter */}
-      <div className="space-y-3 mb-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('searchInventory')}
-            className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
-          />
-        </div>
-        {categoryOptions.length > 0 ? (
-          <div className="flex gap-2 overflow-x-auto scrollbar-thin pb-1 -mx-1 px-1">
-            <button
-              type="button"
-              onClick={() => setCategoryId('')}
-              className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                !categoryId
-                  ? 'bg-brand-600 text-white border-brand-600'
-                  : 'bg-white text-gray-700 border-gray-200 hover:border-brand-300'
-              }`}
-            >
-              {t('allCategories')}
-              <span className={`tabular-nums ${!categoryId ? 'text-brand-100' : 'text-gray-400'}`}>{accessories.length}</span>
-            </button>
-            {categoryOptions.map((c) => {
-              const count = accessories.filter((a) => a.category_id === c.id).length;
-              const active = categoryId === c.id;
-              return (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => setCategoryId(c.id)}
-                  className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                    active
-                      ? 'bg-brand-600 text-white border-brand-600'
-                      : 'bg-white text-gray-700 border-gray-200 hover:border-brand-300'
-                  }`}
-                >
-                  <span className="truncate max-w-[10rem]">{tn(c.name)}</span>
-                  <span className={`tabular-nums ${active ? 'text-brand-100' : 'text-gray-400'}`}>{count}</span>
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-      </div>
+      <InventoryFilterBar
+        search={search}
+        onSearchChange={setSearch}
+        categoryId={categoryId}
+        onCategoryChange={setCategoryId}
+        categories={categoryOptions}
+        totalCount={accessories.length}
+      />
 
       {accessories.length === 0 ? (
         <EmptyState icon={Package} title={t('noAccessoriesYet')} description={t('addAccessoriesDesc')} action={<Button onClick={() => setShowForm(true)}><Plus className="w-4 h-4" /> {t('addAccessory')}</Button>} />
