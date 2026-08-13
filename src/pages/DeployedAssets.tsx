@@ -15,6 +15,7 @@ import {
 import { repairTurkishName } from '@/lib/turkishNames';
 import { insertCheckoutHistory } from '@/lib/checkoutHistory';
 import { issueStock } from '@/lib/stockIssue';
+import { canonicalEntityName, registerEntityPair, categoryIdentityKey } from '@/lib/entityI18n';
 
 interface Props {
   assets: Asset[];
@@ -34,30 +35,46 @@ interface Props {
 async function resolveOrCreateCategory(name: string, existing: Category[]): Promise<string | null> {
   const trimmed = name.trim();
   if (!trimmed) return null;
-  const found = existing.find((c) => c.name.toLowerCase() === trimmed.toLowerCase() && c.type === 'asset');
+  const pair = registerEntityPair(trimmed, '');
+  const canonical = canonicalEntityName(pair) || trimmed;
+  const found = existing.find((c) =>
+    c.type === 'asset' && (
+      c.name.toLowerCase() === trimmed.toLowerCase()
+      || c.name.toLowerCase() === canonical.toLowerCase()
+      || categoryIdentityKey(c) === categoryIdentityKey({ name: canonical, type: 'asset' })
+    ),
+  );
   if (found) return found.id;
-  const { data } = await supabase.from('categories').insert({ name: trimmed, type: 'asset', color: 'slate' }).select('id').single();
-  if (data?.id) existing.push({ ...data, name: trimmed, type: 'asset', color: 'slate', created_at: new Date().toISOString() } as Category);
+  const { data } = await supabase.from('categories').insert({ name: canonical, type: 'asset', color: 'slate' }).select('id').single();
+  if (data?.id) existing.push({ ...data, name: canonical, type: 'asset', color: 'slate', created_at: new Date().toISOString() } as Category);
   return data?.id || null;
 }
 
 async function resolveOrCreateManufacturer(name: string, existing: Manufacturer[]): Promise<string | null> {
   const trimmed = name.trim();
   if (!trimmed) return null;
-  const found = existing.find((m) => m.name.toLowerCase() === trimmed.toLowerCase());
+  const pair = registerEntityPair(trimmed, '');
+  const canonical = canonicalEntityName(pair) || trimmed;
+  const found = existing.find((m) =>
+    m.name.toLowerCase() === trimmed.toLowerCase() || m.name.toLowerCase() === canonical.toLowerCase(),
+  );
   if (found) return found.id;
-  const { data } = await supabase.from('manufacturers').insert({ name: trimmed }).select('id').single();
-  if (data?.id) existing.push({ id: data.id, name: trimmed, url: null, support_url: null, created_at: new Date().toISOString() });
+  const { data } = await supabase.from('manufacturers').insert({ name: canonical }).select('id').single();
+  if (data?.id) existing.push({ id: data.id, name: canonical, url: null, support_url: null, created_at: new Date().toISOString() });
   return data?.id || null;
 }
 
 async function resolveOrCreateLocation(name: string, existing: Location[]): Promise<string | null> {
   const trimmed = name.trim();
   if (!trimmed) return null;
-  const found = existing.find((l) => l.name.toLowerCase() === trimmed.toLowerCase());
+  const pair = registerEntityPair(trimmed, '');
+  const canonical = canonicalEntityName(pair) || trimmed;
+  const found = existing.find((l) =>
+    l.name.toLowerCase() === trimmed.toLowerCase() || l.name.toLowerCase() === canonical.toLowerCase(),
+  );
   if (found) return found.id;
-  const { data } = await supabase.from('locations').insert({ name: trimmed }).select('id').single();
-  if (data?.id) existing.push({ id: data.id, name: trimmed, address: null, city: null, country: null, created_at: new Date().toISOString() });
+  const { data } = await supabase.from('locations').insert({ name: canonical }).select('id').single();
+  if (data?.id) existing.push({ id: data.id, name: canonical, address: null, city: null, country: null, created_at: new Date().toISOString() });
   return data?.id || null;
 }
 

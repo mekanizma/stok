@@ -26,6 +26,10 @@ async function currentActor() {
   return { name, email };
 }
 
+export async function getCurrentActor() {
+  return currentActor();
+}
+
 /** Insert checkout_history row and stamp the logged-in staff account. */
 export async function insertCheckoutHistory(row: CheckoutHistoryInsert) {
   const actor = await currentActor();

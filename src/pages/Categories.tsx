@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase, type Category, type Asset } from '@/lib/supabase';
 import { Plus, Edit3, Trash2, Tags, Boxes, KeyRound, Package, PackageCheck, Check } from 'lucide-react';
-import { Button, Modal, Input, Select, PageHeader, EmptyState, ConfirmDialog } from '@/components/ui';
+import { Button, Modal, Select, PageHeader, EmptyState, ConfirmDialog } from '@/components/ui';
 import { useI18n, type TranslationKey } from '@/lib/i18n';
+import { BilingualNameFields, initialBilingualNames } from '@/components/BilingualNameFields';
+import { canonicalEntityName, registerEntityPair } from '@/lib/entityI18n';
+import { findExistingCategory, mergeDuplicateCategories } from '@/lib/mergeDuplicateCategories';
 
 interface Props {
   categories: Category[];
@@ -38,16 +41,48 @@ export default function CategoriesPage({ categories, assets, onRefresh, canDelet
   const [editing, setEditing] = useState<Category | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Category | null>(null);
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [mergeNote, setMergeNote] = useState('');
+  const mergeTried = useRef(false);
 
-  const handleSave = async (data: Partial<Category>) => {
+  useEffect(() => {
+    if (mergeTried.current || categories.length < 2) return;
+    mergeTried.current = true;
+    let cancelled = false;
+    (async () => {
+      const removed = await mergeDuplicateCategories(categories);
+      if (cancelled || removed <= 0) return;
+      setMergeNote(t('categoriesMerged', { count: removed }));
+      onRefresh();
+    })();
+    return () => { cancelled = true; };
+  }, [categories, onRefresh, t]);
+
+  const handleSave = async (data: Partial<Category> & { nameTr?: string; nameEn?: string }) => {
     setSaving(true);
+    setFormError('');
+    const pair = registerEntityPair(data.nameTr || data.name || '', data.nameEn || data.name || '');
+    const name = canonicalEntityName(pair);
+    const type = (data.type || editing?.type || 'asset') as Category['type'];
+
+    const duplicate = findExistingCategory(categories, {
+      name,
+      type,
+      excludeId: editing?.id,
+    });
+    if (duplicate) {
+      setFormError(t('categoryAlreadyExists', { name: tn(duplicate.name) }));
+      setSaving(false);
+      return;
+    }
+
     if (editing) {
       await supabase.from('categories').update({
-        name: data.name, type: data.type, color: data.color,
+        name, type: data.type, color: data.color,
       }).eq('id', editing.id);
     } else {
       await supabase.from('categories').insert({
-        name: data.name, type: data.type || 'asset', color: data.color || 'slate',
+        name, type: data.type || 'asset', color: data.color || 'slate',
       });
     }
     setSaving(false);
@@ -69,8 +104,14 @@ export default function CategoriesPage({ categories, assets, onRefresh, canDelet
       <PageHeader
         title={t('categories')}
         description={`${categories.length} ${t('categoriesCount')}`}
-        action={<Button onClick={() => { setEditing(null); setShowForm(true); }}><Plus className="w-4 h-4" /> {t('addCategory')}</Button>}
+        action={<Button onClick={() => { setEditing(null); setFormError(''); setShowForm(true); }}><Plus className="w-4 h-4" /> {t('addCategory')}</Button>}
       />
+
+      {mergeNote ? (
+        <p className="mb-4 text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2">
+          {mergeNote}
+        </p>
+      ) : null}
 
       {categories.length === 0 ? (
         <EmptyState icon={Tags} title={t('noCategoriesYet')} description={t('addCategoriesToClassify')} action={<Button onClick={() => setShowForm(true)}><Plus className="w-4 h-4" /> {t('addCategory')}</Button>} />
@@ -85,7 +126,7 @@ export default function CategoriesPage({ categories, assets, onRefresh, canDelet
                     <Icon className="w-5 h-5" />
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={() => { setEditing(c); setShowForm(true); }} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors">
+                    <button onClick={() => { setEditing(c); setFormError(''); setShowForm(true); }} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors">
                       <Edit3 className="w-3.5 h-3.5" />
                     </button>
                     {canDelete ? (
@@ -107,7 +148,13 @@ export default function CategoriesPage({ categories, assets, onRefresh, canDelet
       )}
 
       {showForm && (
-        <CategoryForm category={editing} onClose={() => { setShowForm(false); setEditing(null); }} onSave={handleSave} saving={saving} />
+        <CategoryForm
+          category={editing}
+          error={formError}
+          onClose={() => { setShowForm(false); setEditing(null); setFormError(''); }}
+          onSave={handleSave}
+          saving={saving}
+        />
       )}
 
       <ConfirmDialog
@@ -121,18 +168,23 @@ export default function CategoriesPage({ categories, assets, onRefresh, canDelet
   );
 }
 
-function CategoryForm({ category, onClose, onSave, saving }: {
+function CategoryForm({ category, error, onClose, onSave, saving }: {
   category: Category | null;
+  error?: string;
   onClose: () => void;
-  onSave: (data: Partial<Category>) => void;
+  onSave: (data: Partial<Category> & { nameTr?: string; nameEn?: string }) => void;
   saving: boolean;
 }) {
   const { t } = useI18n();
+  const initial = initialBilingualNames(category?.name);
   const [form, setForm] = useState({
-    name: category?.name || '',
+    nameTr: initial.nameTr,
+    nameEn: initial.nameEn,
     type: category?.type || 'asset',
     color: category?.color || 'blue',
   });
+
+  const canSave = Boolean(form.nameTr.trim() || form.nameEn.trim());
 
   return (
     <Modal
@@ -142,12 +194,16 @@ function CategoryForm({ category, onClose, onSave, saving }: {
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>{t('cancel')}</Button>
-          <Button onClick={() => onSave(form)} disabled={saving || !form.name}>{saving ? t('saving') : t('save')}</Button>
+          <Button onClick={() => onSave(form)} disabled={saving || !canSave}>{saving ? t('saving') : t('save')}</Button>
         </>
       }
     >
       <div className="space-y-4">
-        <Input label={`${t('name')} *`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t('placeholderCategoryName')} required />
+        <BilingualNameFields
+          nameTr={form.nameTr}
+          nameEn={form.nameEn}
+          onChange={({ nameTr, nameEn }) => setForm({ ...form, nameTr, nameEn })}
+        />
         <Select label={t('type')} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as Category['type'] })}>
           <option value="asset">{t('asset')}</option>
           <option value="accessory">{t('accessory')}</option>
@@ -176,6 +232,7 @@ function CategoryForm({ category, onClose, onSave, saving }: {
             })}
           </div>
         </div>
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
       </div>
     </Modal>
   );

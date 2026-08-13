@@ -54,6 +54,14 @@ export const translations = {
   viewAll: { tr: 'Tümünü Gör', en: 'View all' },
   actions: { tr: 'İşlemler', en: 'Actions' },
   name: { tr: 'Ad', en: 'Name' },
+  nameTr: { tr: 'Ad (Türkçe)', en: 'Name (Turkish)' },
+  nameEn: { tr: 'Ad (English)', en: 'Name (English)' },
+  placeholderNameTr: { tr: 'Örn. Dizüstü Bilgisayar', en: 'e.g. Dizüstü Bilgisayar' },
+  placeholderNameEn: { tr: 'Örn. Laptops', en: 'e.g. Laptops' },
+  countryTr: { tr: 'Ülke (Türkçe)', en: 'Country (Turkish)' },
+  countryEn: { tr: 'Ülke (English)', en: 'Country (English)' },
+  bilingualNameHint: { tr: 'Bir dilde yazın; diğer dil mümkünse otomatik dolar. Marka adları genelde aynı kalır.', en: 'Type in one language; the other fills automatically when possible. Brand names usually stay the same.' },
+  bilingualAutoFilled: { tr: 'Karşı dil otomatik dolduruldu — isterseniz düzenleyin.', en: 'The other language was auto-filled — edit if needed.' },
   type: { tr: 'Tip', en: 'Type' },
   color: { tr: 'Renk', en: 'Color' },
   status: { tr: 'Durum', en: 'Status' },
@@ -206,6 +214,8 @@ export const translations = {
   addLocationsToTrack: { tr: 'Demirbaşların nerede saklandığını takip edin.', en: 'Add locations to track where assets are stored.' },
   noCategoriesYet: { tr: 'Henüz kategori yok', en: 'No categories yet' },
   addCategoriesToClassify: { tr: 'Demirbaşları sınıflandırmak için kategori ekleyin.', en: 'Add categories to classify your assets, accessories, and licenses.' },
+  categoriesMerged: { tr: '{count} yinelenen kategori birleştirildi.', en: '{count} duplicate categories were merged.' },
+  categoryAlreadyExists: { tr: 'Bu kategori zaten var: {name}', en: 'This category already exists: {name}' },
   noManufacturersYet: { tr: 'Henüz üretici yok', en: 'No manufacturers yet' },
   addManufacturersToTrack: { tr: 'Demirbaş markalarını takip edin.', en: 'Add manufacturers to track asset brands.' },
   noAccessoriesYet: { tr: 'Henüz aksesuar yok', en: 'No accessories yet' },
@@ -217,7 +227,7 @@ export const translations = {
   noHistoryYet: { tr: 'Henüz kayıt yok', en: 'No history yet' },
   assetNotFound: { tr: 'Demirbaş bulunamadı.', en: 'Asset not found.' },
   scanAssetDesc: { tr: 'Etiket QR kodunu okutun veya demirbaş etiketini yazın.', en: 'Scan the label QR code or type the asset tag.' },
-  scanHint: { tr: 'Telefon kamerası ile etiketteki QR’ı okuyabilir veya buradan barkod / etiket girebilirsiniz.', en: 'Scan the QR on the label with your phone camera, or enter the barcode / tag here.' },
+  scanHint: { tr: 'Kamerayı açıp etiketteki QR / barkodu okutun; isterseniz kodu elle de yazabilirsiniz.', en: 'Open the camera to scan the label QR / barcode, or type the code manually.' },
   scanCodeLabel: { tr: 'Etiket, seri no veya QR içeriği', en: 'Tag, serial, or QR content' },
   scanCodePlaceholder: { tr: 'AST-… veya QR linki', en: 'AST-… or QR link' },
   scanEnterCode: { tr: 'Bir kod girin.', en: 'Enter a code.' },
@@ -225,8 +235,10 @@ export const translations = {
   scanWithCamera: { tr: 'Kamera ile oku', en: 'Scan with camera' },
   scanStartCamera: { tr: 'Kamerayı aç', en: 'Open camera' },
   scanStopCamera: { tr: 'Kamerayı kapat', en: 'Close camera' },
-  scanCameraUnsupported: { tr: 'Bu tarayıcı kamera barkod okumayı desteklemiyor. Kodu elle girin veya telefon kamerasıyla QR’ı açın.', en: 'This browser cannot decode barcodes with the camera. Enter the code manually or open the QR with your phone camera.' },
-  scanCameraDenied: { tr: 'Kamera izni verilmedi.', en: 'Camera permission denied.' },
+  scanCameraUnsupported: { tr: 'Kamera okuma başlatılamadı. Kodu elle girebilirsiniz.', en: 'Could not start camera scan. You can enter the code manually.' },
+  scanCameraDenied: { tr: 'Kamera izni verilmedi. Tarayıcı ayarlarından izin verin.', en: 'Camera permission denied. Allow access in browser settings.' },
+  scanCameraUnavailable: { tr: 'Kamera bulunamadı veya kullanılamıyor.', en: 'No camera found or camera unavailable.' },
+  scanCameraNeedsHttps: { tr: 'Kamera için güvenli bağlantı (HTTPS) gerekir.', en: 'Camera requires a secure connection (HTTPS).' },
   scanManualFallback: { tr: 'USB barkod okuyucu da bu alana yazarak çalışır.', en: 'A USB barcode scanner also works by typing into this field.' },
   scanLabelTip: { tr: 'Etiket yazdırıp yapıştırın; QR her zaman demirbaş detayına gider.', en: 'Print and stick labels; the QR always opens the asset detail.' },
   printLabel: { tr: 'Etiket Yazdır', en: 'Print label' },
@@ -256,6 +268,7 @@ export const translations = {
   assignAssetTo: { tr: 'kullanıcıya zimmetleyin.', en: 'to a user.' },
   assign: { tr: 'Ata', en: 'Assign' },
   performedBy: { tr: 'Yapan', en: 'Performed by' },
+  addedBy: { tr: 'Ekleyen', en: 'Added by' },
   assignedPerson: { tr: 'Zimmetlenen', en: 'Assignee' },
   system: { tr: 'Sistem', en: 'System' },
 
@@ -473,45 +486,8 @@ export const translations = {
 
 export type TranslationKey = keyof typeof translations;
 
-/** Known mock/seed entity names → localized labels */
-export const entityNames: Record<string, { tr: string; en: string }> = {
-  Laptops: { tr: 'Dizüstü Bilgisayar', en: 'Laptops' },
-  NOTEBOOK: { tr: 'Dizüstü Bilgisayar', en: 'Laptops' },
-  Notebook: { tr: 'Dizüstü Bilgisayar', en: 'Laptops' },
-  Desktops: { tr: 'Masaüstü Bilgisayar', en: 'Desktops' },
-  Monitors: { tr: 'Monitörler', en: 'Monitors' },
-  Phones: { tr: 'Telefonlar', en: 'Phones' },
-  'CEP TELEFONU': { tr: 'Telefonlar', en: 'Phones' },
-  Tablets: { tr: 'Tabletler', en: 'Tablets' },
-  Networking: { tr: 'Ağ Ekipmanları', en: 'Networking' },
-  Peripherals: { tr: 'Çevre Birimleri', en: 'Peripherals' },
-  WEBCAM: { tr: 'Çevre Birimleri', en: 'Peripherals' },
-  Audio: { tr: 'Ses', en: 'Audio' },
-  MIKROFON: { tr: 'Ses', en: 'Audio' },
-  Cables: { tr: 'Kablolar', en: 'Cables' },
-  'Toner & Ink': { tr: 'Toner & Mürekkep', en: 'Toner & Ink' },
-  Software: { tr: 'Yazılım', en: 'Software' },
-  'Operating Systems': { tr: 'İşletim Sistemleri', en: 'Operating Systems' },
-  'Main Office': { tr: 'Merkez Ofis', en: 'Main Office' },
-  'Branch Office - Ankara': { tr: 'Şube Ofisi - Ankara', en: 'Branch Office - Ankara' },
-  'Data Center': { tr: 'Veri Merkezi', en: 'Data Center' },
-  Warehouse: { tr: 'Depo', en: 'Warehouse' },
-  Turkey: { tr: 'Türkiye', en: 'Turkey' },
-  'IT Manager': { tr: 'IT Müdürü', en: 'IT Manager' },
-  'Software Developer': { tr: 'Yazılım Geliştirici', en: 'Software Developer' },
-  'System Administrator': { tr: 'Sistem Yöneticisi', en: 'System Administrator' },
-  'Network Engineer': { tr: 'Ağ Mühendisi', en: 'Network Engineer' },
-  'DevOps Engineer': { tr: 'DevOps Mühendisi', en: 'DevOps Engineer' },
-  'Primary development laptop': { tr: 'Ana geliştirme dizüstüsü', en: 'Primary development laptop' },
-  'Screen flickering - sent for repair': { tr: 'Ekran titriyor - onarıma gönderildi', en: 'Screen flickering - sent for repair' },
-  'Initial deployment': { tr: 'İlk dağıtım', en: 'Initial deployment' },
-  'Checked in': { tr: 'İade edildi', en: 'Checked in' },
-  'Checked in from deployed list': { tr: 'Zimmetli listesinden iade edildi', en: 'Checked in from deployed list' },
-  'USB-C Cable 2m': { tr: 'USB-C Kablo 2m', en: 'USB-C Cable 2m' },
-  'HP 414A Black Toner': { tr: 'HP 414A Siyah Toner', en: 'HP 414A Black Toner' },
-  'Microsoft 365 Business Standard': { tr: 'Microsoft 365 Business Standard', en: 'Microsoft 365 Business Standard' },
-  'Adobe Creative Cloud All Apps': { tr: 'Adobe Creative Cloud Tüm Uygulamalar', en: 'Adobe Creative Cloud All Apps' },
-};
+export { entityNames } from '@/lib/entityI18n';
+import { findEntityPair } from '@/lib/entityI18n';
 
 function stripHtml(value: string) {
   return value
@@ -586,9 +562,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const tn = useCallback((name: string | null | undefined) => {
     if (!name) return '';
     const normalized = normalizeEntityName(name);
-    return entityNames[normalized]?.[lang]
-      ?? entityNames[name]?.[lang]
-      ?? (normalized || stripHtml(name));
+    const pair = findEntityPair(normalized) || findEntityPair(name);
+    if (pair) return pair[lang] || pair.tr || pair.en;
+    return normalized || stripHtml(name);
   }, [lang]);
 
   return (

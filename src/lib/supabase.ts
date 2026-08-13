@@ -94,6 +94,8 @@ export interface Accessory {
   qty: number;
   remaining_qty: number;
   min_qty: number;
+  created_by_name?: string | null;
+  created_by_email?: string | null;
   created_at: string;
   manufacturer?: Manufacturer | null;
   category?: Category | null;

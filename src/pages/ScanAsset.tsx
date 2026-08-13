@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Search, QrCode, Camera, Keyboard } from 'lucide-react';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { supabase, type Asset } from '@/lib/supabase';
 import { type Page } from '@/App';
 import { Button, Input, PageHeader } from '@/components/ui';
@@ -9,14 +10,7 @@ interface Props {
   navigate: (p: Page) => void;
 }
 
-type BarcodeDetectorLike = {
-  detect: (source: ImageBitmapSource) => Promise<Array<{ rawValue?: string }>>;
-};
-
-function getBarcodeDetector(): (new (opts?: { formats?: string[] }) => BarcodeDetectorLike) | null {
-  const w = window as Window & { BarcodeDetector?: new (opts?: { formats?: string[] }) => BarcodeDetectorLike };
-  return w.BarcodeDetector || null;
-}
+const SCANNER_REGION_ID = 'asset-qr-reader';
 
 function extractAssetId(raw: string): string | null {
   const text = raw.trim();
@@ -41,10 +35,10 @@ export default function ScanAssetPage({ navigate }: Props) {
   const [error, setError] = useState('');
   const [searching, setSearching] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
+  const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraError, setCameraError] = useState('');
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const scanningRef = useRef(false);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const handlingRef = useRef(false);
 
   const openAsset = (asset: Asset) => {
     navigate({ name: 'asset-detail', id: asset.id });
@@ -101,64 +95,109 @@ export default function ScanAssetPage({ navigate }: Props) {
     }
   };
 
-  const stopCamera = () => {
-    scanningRef.current = false;
-    streamRef.current?.getTracks().forEach((tr) => tr.stop());
-    streamRef.current = null;
-    if (videoRef.current) videoRef.current.srcObject = null;
+  const releaseScanner = async () => {
+    handlingRef.current = false;
+    const scanner = scannerRef.current;
+    scannerRef.current = null;
+    if (!scanner) return;
+    try {
+      if (scanner.isScanning) await scanner.stop();
+    } catch {
+      /* already stopped */
+    }
+    try {
+      scanner.clear();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const stopCamera = async () => {
+    await releaseScanner();
     setCameraOn(false);
+    setCameraStarting(false);
   };
 
   const startCamera = async () => {
     setCameraError('');
-    const Detector = getBarcodeDetector();
-    if (!Detector) {
-      setCameraError(t('scanCameraUnsupported'));
+    setError('');
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError(t('scanCameraUnavailable'));
       return;
     }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' } },
-        audio: false,
-      });
-      streamRef.current = stream;
-      setCameraOn(true);
-      await new Promise((r) => setTimeout(r, 50));
-      const video = videoRef.current;
-      if (!video) {
-        stopCamera();
-        return;
-      }
-      video.srcObject = stream;
-      await video.play();
-      const detector = new Detector({ formats: ['qr_code', 'code_128', 'ean_13', 'code_39'] });
-      scanningRef.current = true;
 
-      const tick = async () => {
-        if (!scanningRef.current || !videoRef.current) return;
-        try {
-          if (video.readyState >= 2) {
-            const codes = await detector.detect(video);
-            const raw = codes.find((c) => c.rawValue)?.rawValue;
-            if (raw) {
-              stopCamera();
-              await resolveCode(raw);
-              return;
-            }
-          }
-        } catch {
-          /* keep scanning */
-        }
-        if (scanningRef.current) requestAnimationFrame(() => { void tick(); });
-      };
-      requestAnimationFrame(() => { void tick(); });
-    } catch {
-      setCameraError(t('scanCameraDenied'));
-      stopCamera();
+    await releaseScanner();
+    setCameraOn(true);
+    setCameraStarting(true);
+
+    // Let React mount #asset-qr-reader before Html5Qrcode attaches.
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+
+    const el = document.getElementById(SCANNER_REGION_ID);
+    if (!el) {
+      setCameraOn(false);
+      setCameraStarting(false);
+      setCameraError(t('scanCameraUnavailable'));
+      return;
+    }
+
+    try {
+      const scanner = new Html5Qrcode(SCANNER_REGION_ID, {
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+        ],
+        verbose: false,
+      });
+      scannerRef.current = scanner;
+
+      const boxSize = Math.min(280, Math.max(180, Math.floor(window.innerWidth * 0.65)));
+      await scanner.start(
+        { facingMode: 'environment' },
+        {
+          fps: 12,
+          qrbox: { width: boxSize, height: boxSize },
+          aspectRatio: 1,
+          disableFlip: false,
+        },
+        (decodedText) => {
+          if (handlingRef.current) return;
+          handlingRef.current = true;
+          void (async () => {
+            await stopCamera();
+            await resolveCode(decodedText);
+          })();
+        },
+        () => {
+          /* no code in this frame */
+        },
+      );
+      setCameraStarting(false);
+    } catch (e) {
+      await releaseScanner();
+      setCameraOn(false);
+      setCameraStarting(false);
+      const msg = e instanceof Error ? e.message.toLowerCase() : String(e).toLowerCase();
+      if (/permission|notallowed|denied|security/i.test(msg)) {
+        setCameraError(t('scanCameraDenied'));
+      } else if (/https|secure|only secure/i.test(msg)) {
+        setCameraError(t('scanCameraNeedsHttps'));
+      } else {
+        setCameraError(t('scanCameraUnavailable'));
+      }
     }
   };
 
-  useEffect(() => () => stopCamera(), []);
+  useEffect(() => () => {
+    void releaseScanner();
+  }, []);
 
   return (
     <div className="p-4 lg:p-6 max-w-xl mx-auto">
@@ -200,16 +239,26 @@ export default function ScanAssetPage({ navigate }: Props) {
             {t('scanWithCamera')}
           </div>
           {!cameraOn ? (
-            <Button type="button" variant="outline" className="w-full" onClick={() => { void startCamera(); }}>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => { void startCamera(); }}
+              disabled={cameraStarting}
+            >
               <Camera className="w-4 h-4" /> {t('scanStartCamera')}
             </Button>
           ) : (
             <div className="space-y-2">
-              <div className="relative overflow-hidden rounded-xl bg-black aspect-[3/4] sm:aspect-video">
-                <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover" playsInline muted />
-                <div className="absolute inset-0 border-2 border-white/40 m-8 sm:m-12 rounded-lg pointer-events-none" />
+              <div className="relative overflow-hidden rounded-xl bg-black min-h-[260px]">
+                <div id={SCANNER_REGION_ID} className="w-full [&_video]:w-full [&_video]:rounded-xl" />
+                {cameraStarting ? (
+                  <div className="absolute inset-0 flex items-center justify-center text-sm text-white/80">
+                    {t('checking')}
+                  </div>
+                ) : null}
               </div>
-              <Button type="button" variant="secondary" className="w-full" onClick={stopCamera}>
+              <Button type="button" variant="secondary" className="w-full" onClick={() => { void stopCamera(); }}>
                 {t('scanStopCamera')}
               </Button>
             </div>

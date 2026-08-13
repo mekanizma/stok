@@ -3,9 +3,21 @@ import { supabase, type Accessory, type Category, type CheckoutHistory, type Loc
 import { Plus, Edit3, Trash2, Package, Search, AlertTriangle, Boxes, CheckCircle2 } from 'lucide-react';
 import { Button, Modal, Input, Select, PageHeader, EmptyState, ConfirmDialog, TablePagination } from '@/components/ui';
 import { IssueMeta, IssueStockModal } from '@/components/IssueStock';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type TranslationKey } from '@/lib/i18n';
 import { notifyCriticalStock } from '@/lib/stockAlerts';
 import { fetchStockIssues, issueStock } from '@/lib/stockIssue';
+import { getCurrentActor } from '@/lib/checkoutHistory';
+import { repairTurkishName } from '@/lib/turkishNames';
+
+const DEFAULT_ACCESSORY_CREATOR = 'Bilal Ugurel';
+
+function accessoryCreatorName(name: string | null | undefined) {
+  const trimmed = (name || '').trim();
+  if (!trimmed) return DEFAULT_ACCESSORY_CREATOR;
+  const lower = trimmed.toLocaleLowerCase('tr-TR');
+  if (lower === 'sistem' || lower === 'system') return DEFAULT_ACCESSORY_CREATOR;
+  return repairTurkishName(trimmed);
+}
 
 interface Props {
   accessories: Accessory[];
@@ -37,6 +49,7 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
   const [issuing, setIssuing] = useState(false);
   const [issueError, setIssueError] = useState('');
   const [search, setSearch] = useState('');
+  const [categoryId, setCategoryId] = useState('');
   const [page, setPage] = useState(1);
   const pageSize = 12;
 
@@ -52,25 +65,33 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
     void loadIssues();
   }, []);
 
+  const categoryOptions = useMemo(() => {
+    return [...categories].sort((a, b) => tn(a.name).localeCompare(tn(b.name), 'tr'));
+  }, [categories, tn]);
+
   const totalQty = accessories.reduce((s, a) => s + a.qty, 0);
   const totalRemaining = accessories.reduce((s, a) => s + a.remaining_qty, 0);
   const lowCount = accessories.filter((a) => a.remaining_qty <= (a.min_qty ?? 1)).length;
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
-    if (!q) return accessories;
-    return accessories.filter((a) =>
-      a.name.toLowerCase().includes(q) ||
-      (a.serial || '').toLowerCase().includes(q) ||
-      (a.manufacturer?.name || '').toLowerCase().includes(q) ||
-      (a.category?.name || '').toLowerCase().includes(q) ||
-      (a.location?.name || '').toLowerCase().includes(q) ||
-      tn(a.category?.name).toLowerCase().includes(q) ||
-      tn(a.location?.name).toLowerCase().includes(q),
-    );
-  }, [accessories, search, tn]);
+    return accessories.filter((a) => {
+      if (categoryId && a.category_id !== categoryId) return false;
+      if (!q) return true;
+      return (
+        a.name.toLowerCase().includes(q) ||
+        (a.serial || '').toLowerCase().includes(q) ||
+        (a.manufacturer?.name || '').toLowerCase().includes(q) ||
+        (a.category?.name || '').toLowerCase().includes(q) ||
+        (a.location?.name || '').toLowerCase().includes(q) ||
+        (a.created_by_name || '').toLowerCase().includes(q) ||
+        tn(a.category?.name).toLowerCase().includes(q) ||
+        tn(a.location?.name).toLowerCase().includes(q)
+      );
+    });
+  }, [accessories, search, categoryId, tn]);
 
-  useEffect(() => { setPage(1); }, [search]);
+  useEffect(() => { setPage(1); }, [search, categoryId]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -95,14 +116,22 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
         remaining_qty: remaining,
       }).eq('id', editing.id);
     } else {
-      await supabase.from('accessories').insert({
+      const actor = await getCurrentActor();
+      const row = {
         name: data.name,
         serial: data.serial?.trim() || null,
         manufacturer_id: data.manufacturer_id || null,
         category_id: data.category_id || null,
         location_id: data.location_id || null,
         qty, remaining_qty: qty, min_qty: minQty,
-      });
+        created_by_name: actor.name ? repairTurkishName(actor.name) : DEFAULT_ACCESSORY_CREATOR,
+        created_by_email: actor.email,
+      };
+      const { error } = await supabase.from('accessories').insert(row);
+      if (error && /created_by_/i.test(error.message)) {
+        const { created_by_name: _n, created_by_email: _e, ...legacy } = row;
+        await supabase.from('accessories').insert(legacy);
+      }
     }
     setSaving(false);
     setShowForm(false);
@@ -190,16 +219,53 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
         </div>
       </div>
 
-      {/* Search */}
-      <div className="relative mb-4">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={t('searchInventory')}
-          className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
-        />
+      {/* Search + category filter */}
+      <div className="space-y-3 mb-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('searchInventory')}
+            className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+          />
+        </div>
+        {categoryOptions.length > 0 ? (
+          <div className="flex gap-2 overflow-x-auto scrollbar-thin pb-1 -mx-1 px-1">
+            <button
+              type="button"
+              onClick={() => setCategoryId('')}
+              className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                !categoryId
+                  ? 'bg-brand-600 text-white border-brand-600'
+                  : 'bg-white text-gray-700 border-gray-200 hover:border-brand-300'
+              }`}
+            >
+              {t('allCategories')}
+              <span className={`tabular-nums ${!categoryId ? 'text-brand-100' : 'text-gray-400'}`}>{accessories.length}</span>
+            </button>
+            {categoryOptions.map((c) => {
+              const count = accessories.filter((a) => a.category_id === c.id).length;
+              const active = categoryId === c.id;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setCategoryId(c.id)}
+                  className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                    active
+                      ? 'bg-brand-600 text-white border-brand-600'
+                      : 'bg-white text-gray-700 border-gray-200 hover:border-brand-300'
+                  }`}
+                >
+                  <span className="truncate max-w-[10rem]">{tn(c.name)}</span>
+                  <span className={`tabular-nums ${active ? 'text-brand-100' : 'text-gray-400'}`}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
 
       {accessories.length === 0 ? (
@@ -253,6 +319,12 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
                       <span className="font-mono text-gray-700">{a.serial}</span>
                     </p>
                   ) : null}
+                  <p className="mt-1 text-[11px] text-gray-500 truncate" title={a.created_by_email || undefined}>
+                    <span className="text-gray-400">{t('addedBy')}: </span>
+                    <span className="font-medium text-gray-700">
+                      {accessoryCreatorName(a.created_by_name)}
+                    </span>
+                  </p>
                   <div className="mt-3 grid grid-cols-3 gap-1">
                     <div className="rounded-lg bg-slate-50 py-1.5 text-center">
                       <p className="text-[9px] uppercase tracking-wide text-gray-400">{t('inStock')}</p>
@@ -376,7 +448,13 @@ function AccessoryForm({ accessory, categories, manufacturers, locations, onClos
         </Select>
         <Select label={t('category')} value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
           <option value="">{t('none')}</option>
-          {categories.map((c) => <option key={c.id} value={c.id}>{tn(c.name)}</option>)}
+          {[...categories]
+            .sort((a, b) => tn(a.name).localeCompare(tn(b.name), 'tr'))
+            .map((c) => (
+              <option key={c.id} value={c.id}>
+                {tn(c.name)} ({t(c.type as TranslationKey)})
+              </option>
+            ))}
         </Select>
         <Select label={t('location')} value={form.location_id} onChange={(e) => setForm({ ...form, location_id: e.target.value })}>
           <option value="">{t('none')}</option>

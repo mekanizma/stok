@@ -3,6 +3,8 @@ import { supabase, type Manufacturer, type Asset } from '@/lib/supabase';
 import { Plus, Edit3, Trash2, Building2, ExternalLink, LifeBuoy } from 'lucide-react';
 import { Button, Modal, Input, PageHeader, EmptyState, ConfirmDialog } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
+import { BilingualNameFields, initialBilingualNames } from '@/components/BilingualNameFields';
+import { canonicalEntityName, registerEntityPair } from '@/lib/entityI18n';
 
 interface Props {
   manufacturers: Manufacturer[];
@@ -12,21 +14,23 @@ interface Props {
 }
 
 export default function ManufacturersPage({ manufacturers, assets, onRefresh, canDelete = false }: Props) {
-  const { t } = useI18n();
+  const { t, tn } = useI18n();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Manufacturer | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Manufacturer | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const handleSave = async (data: Partial<Manufacturer>) => {
+  const handleSave = async (data: Partial<Manufacturer> & { nameTr?: string; nameEn?: string }) => {
     setSaving(true);
+    const pair = registerEntityPair(data.nameTr || data.name || '', data.nameEn || data.name || '');
+    const name = canonicalEntityName(pair);
     if (editing) {
       await supabase.from('manufacturers').update({
-        name: data.name, url: data.url, support_url: data.support_url,
+        name, url: data.url, support_url: data.support_url,
       }).eq('id', editing.id);
     } else {
       await supabase.from('manufacturers').insert({
-        name: data.name, url: data.url || null, support_url: data.support_url || null,
+        name, url: data.url || null, support_url: data.support_url || null,
       });
     }
     setSaving(false);
@@ -73,7 +77,7 @@ export default function ManufacturersPage({ manufacturers, assets, onRefresh, ca
                       <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-slate-100 text-slate-500 shrink-0">
                         <Building2 className="w-4 h-4" />
                       </div>
-                      <span className="text-sm font-medium text-gray-900">{m.name}</span>
+                      <span className="text-sm font-medium text-gray-900">{tn(m.name)}</span>
                     </div>
                   </td>
                   <td className="px-4 py-3 hidden md:table-cell">
@@ -107,7 +111,7 @@ export default function ManufacturersPage({ manufacturers, assets, onRefresh, ca
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
         title={t('deleteManufacturer')}
-        message={t('deleteConfirm', { name: deleteTarget?.name || '' })}
+        message={t('deleteConfirm', { name: tn(deleteTarget?.name) })}
       />
     </div>
   );
@@ -116,15 +120,19 @@ export default function ManufacturersPage({ manufacturers, assets, onRefresh, ca
 function ManufacturerForm({ manufacturer, onClose, onSave, saving }: {
   manufacturer: Manufacturer | null;
   onClose: () => void;
-  onSave: (data: Partial<Manufacturer>) => void;
+  onSave: (data: Partial<Manufacturer> & { nameTr?: string; nameEn?: string }) => void;
   saving: boolean;
 }) {
   const { t } = useI18n();
+  const initial = initialBilingualNames(manufacturer?.name);
   const [form, setForm] = useState({
-    name: manufacturer?.name || '',
+    nameTr: initial.nameTr,
+    nameEn: initial.nameEn,
     url: manufacturer?.url || '',
     support_url: manufacturer?.support_url || '',
   });
+
+  const canSave = Boolean(form.nameTr.trim() || form.nameEn.trim());
 
   return (
     <Modal
@@ -134,12 +142,16 @@ function ManufacturerForm({ manufacturer, onClose, onSave, saving }: {
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>{t('cancel')}</Button>
-          <Button onClick={() => onSave(form)} disabled={saving || !form.name}>{saving ? t('saving') : t('save')}</Button>
+          <Button onClick={() => onSave(form)} disabled={saving || !canSave}>{saving ? t('saving') : t('save')}</Button>
         </>
       }
     >
       <div className="space-y-4">
-        <Input label={`${t('name')} *`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t('placeholderManufacturerName')} required />
+        <BilingualNameFields
+          nameTr={form.nameTr}
+          nameEn={form.nameEn}
+          onChange={({ nameTr, nameEn }) => setForm({ ...form, nameTr, nameEn })}
+        />
         <Input label={t('website')} value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder={t('exampleUrl')} />
         <Input label={t('supportUrl')} value={form.support_url} onChange={(e) => setForm({ ...form, support_url: e.target.value })} placeholder={t('exampleUrl')} />
       </div>

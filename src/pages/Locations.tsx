@@ -3,6 +3,8 @@ import { supabase, type Location, type Asset, type UserRecord } from '@/lib/supa
 import { Plus, Edit3, Trash2, MapPin, Boxes, Users } from 'lucide-react';
 import { Button, Modal, Input, PageHeader, EmptyState, ConfirmDialog } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
+import { BilingualNameFields, initialBilingualNames } from '@/components/BilingualNameFields';
+import { canonicalEntityName, registerEntityPair } from '@/lib/entityI18n';
 
 interface Props {
   locations: Location[];
@@ -18,15 +20,21 @@ export default function LocationsPage({ locations, assets, users, onRefresh }: P
   const [deleteTarget, setDeleteTarget] = useState<Location | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const handleSave = async (data: Partial<Location>) => {
+  const handleSave = async (data: Partial<Location> & { nameTr?: string; nameEn?: string; countryTr?: string; countryEn?: string }) => {
     setSaving(true);
+    const pair = registerEntityPair(data.nameTr || data.name || '', data.nameEn || data.name || '');
+    const name = canonicalEntityName(pair);
+    const countryPair = registerEntityPair(data.countryTr || data.country || '', data.countryEn || data.country || '');
+    const country = data.countryTr || data.countryEn || data.country
+      ? canonicalEntityName(countryPair)
+      : null;
     if (editing) {
       await supabase.from('locations').update({
-        name: data.name, address: data.address, city: data.city, country: data.country,
+        name, address: data.address, city: data.city, country,
       }).eq('id', editing.id);
     } else {
       await supabase.from('locations').insert({
-        name: data.name, address: data.address || null, city: data.city || null, country: data.country || null,
+        name, address: data.address || null, city: data.city || null, country,
       });
     }
     setSaving(false);
@@ -105,16 +113,22 @@ export default function LocationsPage({ locations, assets, users, onRefresh }: P
 function LocationForm({ location, onClose, onSave, saving }: {
   location: Location | null;
   onClose: () => void;
-  onSave: (data: Partial<Location>) => void;
+  onSave: (data: Partial<Location> & { nameTr?: string; nameEn?: string; countryTr?: string; countryEn?: string }) => void;
   saving: boolean;
 }) {
   const { t } = useI18n();
+  const initial = initialBilingualNames(location?.name);
+  const countryInitial = initialBilingualNames(location?.country);
   const [form, setForm] = useState({
-    name: location?.name || '',
+    nameTr: initial.nameTr,
+    nameEn: initial.nameEn,
     address: location?.address || '',
     city: location?.city || '',
-    country: location?.country || '',
+    countryTr: countryInitial.nameTr,
+    countryEn: countryInitial.nameEn,
   });
+
+  const canSave = Boolean(form.nameTr.trim() || form.nameEn.trim());
 
   return (
     <Modal
@@ -124,17 +138,26 @@ function LocationForm({ location, onClose, onSave, saving }: {
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>{t('cancel')}</Button>
-          <Button onClick={() => onSave(form)} disabled={saving || !form.name}>{saving ? t('saving') : t('save')}</Button>
+          <Button onClick={() => onSave(form)} disabled={saving || !canSave}>{saving ? t('saving') : t('save')}</Button>
         </>
       }
     >
       <div className="space-y-4">
-        <Input label={`${t('name')} *`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t('placeholderLocationName')} required />
+        <BilingualNameFields
+          nameTr={form.nameTr}
+          nameEn={form.nameEn}
+          onChange={({ nameTr, nameEn }) => setForm({ ...form, nameTr, nameEn })}
+        />
         <Input label={t('address')} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
-        <div className="grid grid-cols-2 gap-4">
-          <Input label={t('city')} value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
-          <Input label={t('country')} value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} />
-        </div>
+        <Input label={t('city')} value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
+        <BilingualNameFields
+          nameTr={form.countryTr}
+          nameEn={form.countryEn}
+          onChange={({ nameTr, nameEn }) => setForm({ ...form, countryTr: nameTr, countryEn: nameEn })}
+          required={false}
+          labelTr={t('countryTr')}
+          labelEn={t('countryEn')}
+        />
       </div>
     </Modal>
   );
