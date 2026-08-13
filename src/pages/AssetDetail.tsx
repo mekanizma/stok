@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase, type Asset, type UserRecord, type Location, type CheckoutHistory } from '@/lib/supabase';
+import { supabase, type Asset, type Location, type CheckoutHistory } from '@/lib/supabase';
 import { ArrowLeft, Boxes, Tag, FileText, ArrowRightLeft, Edit3, Trash2, MapPin, User as UserIcon, Building2, Package, Printer } from 'lucide-react';
 import { type Page } from '@/App';
 import { StatusBadge, Button, Avatar, Modal, Select } from '@/components/ui';
@@ -12,19 +12,16 @@ interface Props {
   assetId: string;
   navigate: (p: Page) => void;
   onRefresh: () => void;
-  users: UserRecord[];
   locations: Location[];
   canManage?: boolean;
   canDelete?: boolean;
 }
 
-export default function AssetDetail({ assetId, navigate, onRefresh, users, locations, canManage = false, canDelete = false }: Props) {
+export default function AssetDetail({ assetId, navigate, onRefresh, locations, canManage = false, canDelete = false }: Props) {
   const { t, tn, lang } = useI18n();
   const [asset, setAsset] = useState<Asset | null>(null);
   const [history, setHistory] = useState<CheckoutHistory[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCheckout, setShowCheckout] = useState(false);
-  const [checkoutUser, setCheckoutUser] = useState('');
   const [showCheckin, setShowCheckin] = useState(false);
   const [checkinLocationId, setCheckinLocationId] = useState('');
   const [checkingIn, setCheckingIn] = useState(false);
@@ -53,22 +50,6 @@ export default function AssetDetail({ assetId, navigate, onRefresh, users, locat
       await Promise.all([fetchAsset(), fetchHistory()]);
     })();
   }, [assetId]);
-
-  const handleCheckout = async () => {
-    if (!canManage || !asset || !checkoutUser) return;
-    await supabase.from('assets').update({ assigned_to_id: checkoutUser, status: 'deployed' }).eq('id', asset.id);
-    await insertCheckoutHistory({
-      asset_id: asset.id,
-      assigned_to_id: checkoutUser,
-      action: 'checkout',
-      note: t('checkedOutFromDetail'),
-    });
-    setShowCheckout(false);
-    setCheckoutUser('');
-    fetchAsset();
-    fetchHistory();
-    onRefresh();
-  };
 
   const handleCheckin = async () => {
     if (!canManage || !asset || !isAssetDeployed(asset) || !checkinLocationId) return;
@@ -292,16 +273,12 @@ ${hasAssignee ? `<div class="section"><h2>${t('assignedToInfo')}</h2><table clas
             })()}
 
             <div className="flex flex-wrap gap-2">
-              {canManage && (
-                isAssetDeployed(asset) ? (
-                  <Button onClick={() => {
-                    setCheckinLocationId(asset.default_location_id || '');
-                    setShowCheckin(true);
-                  }}><ArrowRightLeft className="w-4 h-4" /> {t('checkIn')}</Button>
-                ) : (
-                  <Button onClick={() => setShowCheckout(true)}><ArrowRightLeft className="w-4 h-4" /> {t('checkOut')}</Button>
-                )
-              )}
+              {canManage && isAssetDeployed(asset) ? (
+                <Button onClick={() => {
+                  setCheckinLocationId(asset.default_location_id || '');
+                  setShowCheckin(true);
+                }}><ArrowRightLeft className="w-4 h-4" /> {t('checkIn')}</Button>
+              ) : null}
               <Button variant="outline" onClick={generatePDF}><Printer className="w-4 h-4" /> {t('printDocument')}</Button>
               <Button variant="outline" onClick={() => navigate(backPage())}><Edit3 className="w-4 h-4" /> {t('back')}</Button>
               {canDelete ? (
@@ -373,25 +350,6 @@ ${hasAssignee ? `<div class="section"><h2>${t('assignedToInfo')}</h2><table clas
           )}
         </div>
       </div>
-
-      {/* Checkout Modal */}
-      <Modal
-        open={canManage && showCheckout}
-        onClose={() => setShowCheckout(false)}
-        title={t('checkOut')}
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setShowCheckout(false)}>{t('cancel')}</Button>
-            <Button onClick={handleCheckout} disabled={!checkoutUser}>{t('checkOut')}</Button>
-          </>
-        }
-      >
-        <p className="text-sm text-gray-600 mb-3"><span className="font-medium text-gray-900">{getAssetDisplayName(asset)}</span> {t('assignAssetTo')}</p>
-        <Select label={t('assignTo')} value={checkoutUser} onChange={(e) => setCheckoutUser(e.target.value)}>
-          <option value="">{t('selectUser')}</option>
-          {users.map((u) => <option key={u.id} value={u.id}>{u.first_name} {u.last_name} — {tn(u.job_title) || t('employee')}</option>)}
-        </Select>
-      </Modal>
 
       <Modal
         open={canManage && showCheckin}

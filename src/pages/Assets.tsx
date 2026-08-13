@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { Plus, Search, Boxes, Trash2, Edit3, Monitor, CheckCircle2, ClipboardCheck } from 'lucide-react';
 import { Button, Modal, Input, Select, Textarea, PageHeader, EmptyState, ConfirmDialog, TablePagination } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
-import { getAssetDisplayName } from '@/lib/assetAssignee';
+import { getAssetInventoryName } from '@/lib/assetAssignee';
 import { insertCheckoutHistory } from '@/lib/checkoutHistory';
 import { repairTurkishName } from '@/lib/turkishNames';
 
@@ -244,7 +244,7 @@ export default function AssetsPage({
                       ) : null}
                     </div>
                   </div>
-                  <h3 className="magic-card-title mt-2 text-sm truncate capitalize" title={getAssetDisplayName(a)}>{getAssetDisplayName(a)}</h3>
+                  <h3 className="magic-card-title mt-2 text-sm truncate" title={getAssetInventoryName(a)}>{getAssetInventoryName(a)}</h3>
                   <p className="mt-1 text-[11px] text-gray-500 truncate">
                     {a.manufacturer?.name || '—'}
                     <span className="mx-1 text-gray-300">·</span>
@@ -318,7 +318,7 @@ export default function AssetsPage({
       >
         <div className="space-y-4">
           <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2.5">
-            <p className="text-sm font-semibold text-gray-900 truncate">{issueTarget ? getAssetDisplayName(issueTarget) : ''}</p>
+            <p className="text-sm font-semibold text-gray-900 truncate">{issueTarget ? getAssetInventoryName(issueTarget) : ''}</p>
             <p className="text-xs text-gray-500 mt-0.5 font-mono">{issueTarget?.serial || '—'}</p>
             <p className="text-xs text-gray-400 mt-1">{t('issueGoesToDeployed')}</p>
           </div>
@@ -360,7 +360,7 @@ export default function AssetsPage({
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
         title={t('deleteAsset')}
-        message={t('deleteAssetConfirm', { name: getAssetDisplayName(deleteTarget) })}
+        message={t('deleteAssetConfirm', { name: getAssetInventoryName(deleteTarget) })}
       />
     </div>
   );

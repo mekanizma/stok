@@ -405,9 +405,9 @@ export default function App() {
           />
         );
       case 'checked-in-assets':
-        return <CheckedInAssetsPage assets={assets} loading={loading} canManage={canManageZimmet(appRole)} canDelete={canDeleteRecords(appRole)} navigate={navigate} onRefresh={() => { fetchAssets(); fetchUsers(); }} />;
+        return <CheckedInAssetsPage assets={assets} loading={loading} canDelete={canDeleteRecords(appRole)} navigate={navigate} onRefresh={() => { fetchAssets(); fetchUsers(); }} />;
       case 'asset-detail':
-        return <AssetDetail assetId={page.id} navigate={navigate} onRefresh={fetchAssets} users={users} locations={locations} canManage={canManageZimmet(appRole)} canDelete={canDeleteRecords(appRole)} />;
+        return <AssetDetail assetId={page.id} navigate={navigate} onRefresh={fetchAssets} locations={locations} canManage={canManageZimmet(appRole)} canDelete={canDeleteRecords(appRole)} />;
       case 'users':
         return <UsersPage users={users} locations={locations} assets={assets} onRefresh={fetchUsers} />;
       case 'locations':

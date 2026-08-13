@@ -1,16 +1,14 @@
 import { useState, useMemo, useEffect } from 'react';
 import { supabase, type Asset, type CheckoutHistory } from '@/lib/supabase';
-import { Search, PackageCheck, Boxes, ArrowRightLeft, Trash2, MapPin } from 'lucide-react';
+import { Search, PackageCheck, Boxes, Trash2, MapPin } from 'lucide-react';
 import { type Page } from '@/App';
-import { StatusBadge, Button, Modal, Input, PageHeader, EmptyState, Avatar, TablePagination, ConfirmDialog, type PageSize } from '@/components/ui';
+import { StatusBadge, PageHeader, EmptyState, Avatar, TablePagination, ConfirmDialog, type PageSize } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { isAssetDeployed, getAssetDisplayName } from '@/lib/assetAssignee';
-import { insertCheckoutHistory } from '@/lib/checkoutHistory';
 
 interface Props {
   assets: Asset[];
   loading: boolean;
-  canManage?: boolean;
   canDelete?: boolean;
   navigate: (p: Page) => void;
   onRefresh: () => void;
@@ -21,16 +19,14 @@ interface ReturnedRow {
   history: CheckoutHistory;
 }
 
-export default function CheckedInAssetsPage({ assets, loading, canManage = false, canDelete = false, navigate, onRefresh }: Props) {
+export default function CheckedInAssetsPage({ assets, loading, canDelete = false, navigate, onRefresh }: Props) {
   const { t, tn, lang } = useI18n();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(20);
   const [history, setHistory] = useState<CheckoutHistory[]>([]);
   const [histLoading, setHistLoading] = useState(true);
-  const [checkoutTarget, setCheckoutTarget] = useState<Asset | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Asset | null>(null);
-  const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
@@ -77,37 +73,6 @@ export default function CheckedInAssetsPage({ assets, loading, canManage = false
     const start = (safePage - 1) * pageSize;
     return rows.slice(start, start + pageSize);
   }, [rows, safePage, pageSize]);
-
-  const handleCheckout = async (data: { first_name: string; last_name: string; email: string }) => {
-    if (!canManage || !checkoutTarget || !data.first_name.trim() || !data.email.trim()) return;
-    setSaving(true);
-
-    const assigneeName = `${data.first_name.trim()} ${data.last_name.trim()}`.trim();
-    const assigneeEmail = data.email.trim().toLowerCase();
-
-    const { error } = await supabase.from('assets').update({
-      assigned_to_id: null,
-      assignee_name: assigneeName,
-      assignee_email: assigneeEmail,
-      status: 'deployed',
-    }).eq('id', checkoutTarget.id);
-
-    if (error) {
-      setSaving(false);
-      return;
-    }
-
-    await insertCheckoutHistory({
-      asset_id: checkoutTarget.id,
-      assigned_to_id: null,
-      action: 'checkout',
-      note: `${t('checkedOutFromAssets')} — ${assigneeName} (${assigneeEmail})`,
-    });
-
-    setSaving(false);
-    setCheckoutTarget(null);
-    onRefresh();
-  };
 
   const handleDelete = async () => {
     if (!canDelete || !deleteTarget) return;
@@ -170,14 +135,16 @@ export default function CheckedInAssetsPage({ assets, loading, canManage = false
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden lg:table-cell">{t('returnedBy')}</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden lg:table-cell">{t('returnedAt')}</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('status')}</th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('actions')}</th>
+                  {canDelete ? (
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('actions')}</th>
+                  ) : null}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {pagedRows.map(({ asset: a, history: h }) => (
                   <tr key={a.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3">
-                      <button onClick={() => navigate({ name: 'asset-detail', id: a.id })} className="flex items-center gap-3 text-left group">
+                      <button onClick={() => navigate({ name: 'asset-detail', id: a.id })} className="flex items-center gap-3 text-left group min-w-0">
                         <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-50 text-emerald-600 shrink-0 group-hover:bg-brand-50 group-hover:text-brand-600 transition-colors">
                           <Boxes className="w-4 h-4" />
                         </div>
@@ -217,14 +184,9 @@ export default function CheckedInAssetsPage({ assets, loading, canManage = false
                     <td className="px-4 py-3">
                       <StatusBadge status={a.status} />
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        {canManage ? (
-                          <Button size="sm" onClick={() => setCheckoutTarget(a)}>
-                            <ArrowRightLeft className="w-3.5 h-3.5" /> {t('checkOut')}
-                          </Button>
-                        ) : null}
-                        {canDelete ? (
+                    {canDelete ? (
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end">
                           <button
                             type="button"
                             onClick={() => setDeleteTarget(a)}
@@ -233,12 +195,9 @@ export default function CheckedInAssetsPage({ assets, loading, canManage = false
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
-                        ) : null}
-                        {!canManage && !canDelete ? (
-                          <span className="text-xs text-gray-400">—</span>
-                        ) : null}
-                      </div>
-                    </td>
+                        </div>
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
@@ -254,15 +213,6 @@ export default function CheckedInAssetsPage({ assets, loading, canManage = false
         </div>
       )}
 
-      {canManage && checkoutTarget && (
-        <ReCheckoutForm
-          assetName={getAssetDisplayName(checkoutTarget)}
-          saving={saving}
-          onClose={() => setCheckoutTarget(null)}
-          onSave={handleCheckout}
-        />
-      )}
-
       <ConfirmDialog
         open={canDelete && !!deleteTarget}
         onClose={() => { if (!deleting) setDeleteTarget(null); }}
@@ -273,66 +223,5 @@ export default function CheckedInAssetsPage({ assets, loading, canManage = false
         confirmVariant="danger"
       />
     </div>
-  );
-}
-
-function ReCheckoutForm({ assetName, onClose, onSave, saving }: {
-  assetName: string;
-  onClose: () => void;
-  onSave: (data: { first_name: string; last_name: string; email: string }) => void;
-  saving: boolean;
-}) {
-  const { t } = useI18n();
-  const [form, setForm] = useState({
-    first_name: '',
-    last_name: '',
-    email: '',
-  });
-
-  const canSave = Boolean(form.first_name.trim() && form.email.trim());
-
-  return (
-    <Modal
-      open={true}
-      onClose={onClose}
-      title={t('checkOut')}
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>{t('cancel')}</Button>
-          <Button onClick={() => onSave(form)} disabled={saving || !canSave}>
-            {saving ? t('saving') : t('checkOut')}
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-4">
-        <p className="text-sm text-gray-600">
-          <span className="font-medium text-gray-900">{assetName}</span> {t('assignAssetTo')}
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input
-            label={`${t('firstName')} *`}
-            value={form.first_name}
-            onChange={(e) => setForm({ ...form, first_name: e.target.value })}
-            placeholder={t('firstName')}
-            required
-          />
-          <Input
-            label={t('lastName')}
-            value={form.last_name}
-            onChange={(e) => setForm({ ...form, last_name: e.target.value })}
-            placeholder={t('lastName')}
-          />
-        </div>
-        <Input
-          label={`${t('email')} *`}
-          type="email"
-          value={form.email}
-          onChange={(e) => setForm({ ...form, email: e.target.value })}
-          placeholder={t('placeholderEmail')}
-          required
-        />
-      </div>
-    </Modal>
   );
 }

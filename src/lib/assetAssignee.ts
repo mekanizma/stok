@@ -47,6 +47,15 @@ export function getAssetDisplayName(asset: Asset | null | undefined, fallback = 
   return repairTurkishName(asset.name) || fallback;
 }
 
+/** Inventory card title: computer/model name, not the assignee. */
+export function getAssetInventoryName(asset: Asset | null | undefined, fallback = '—') {
+  if (!asset) return fallback;
+  const model = asset.model?.trim();
+  if (model) return model;
+  if (!isUnnamedAssetName(asset.name)) return repairTurkishName(asset.name);
+  return repairTurkishName(asset.name) || fallback;
+}
+
 export function isAssetDeployed(asset: Asset) {
   return asset.status === 'deployed' && Boolean(asset.assigned_to_id || asset.assignee_name?.trim());
 }
