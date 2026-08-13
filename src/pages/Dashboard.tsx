@@ -1,9 +1,9 @@
 import { type Asset, type UserRecord, type Location, type Category, type Accessory, type Consumable, type License } from '@/lib/supabase';
-import { Boxes, CheckCircle2, TrendingUp, Users, MapPin, Package, KeyRound, PackageCheck, ArrowRight, Activity } from 'lucide-react';
+import { Boxes, CheckCircle2, TrendingUp, Users, MapPin, Package, KeyRound, PackageCheck, ArrowRight, Activity, AlertTriangle } from 'lucide-react';
 import { type Page } from '@/App';
-import { StatusBadge, Avatar } from '@/components/ui';
+import { StatusBadge } from '@/components/ui';
 import { useI18n, type TranslationKey } from '@/lib/i18n';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase, type CheckoutHistory } from '@/lib/supabase';
 import { getAssetDisplayName } from '@/lib/assetAssignee';
 import { canAccessPage, type AppRole } from '@/lib/roles';
@@ -37,6 +37,55 @@ export default function Dashboard({ assets, users, locations, categories, access
 
   const ready = assets.filter((a) => a.status === 'ready').length;
   const deployed = assets.filter((a) => a.status === 'deployed').length;
+
+  const canSeeAccessories = canAccessPage(appRole, 'accessories');
+  const canSeeConsumables = canAccessPage(appRole, 'consumables');
+
+  const criticalStock = useMemo(() => {
+    const items: {
+      id: string;
+      kind: 'accessory' | 'consumable';
+      name: string;
+      remaining: number;
+      minQty: number;
+      page: 'accessories' | 'consumables';
+    }[] = [];
+
+    if (canSeeAccessories) {
+      for (const a of accessories) {
+        const minQty = a.min_qty ?? 1;
+        if (a.remaining_qty <= minQty) {
+          items.push({
+            id: a.id,
+            kind: 'accessory',
+            name: a.name,
+            remaining: a.remaining_qty,
+            minQty,
+            page: 'accessories',
+          });
+        }
+      }
+    }
+    if (canSeeConsumables) {
+      for (const c of consumables) {
+        const minQty = c.min_qty ?? 1;
+        if (c.remaining_qty <= minQty) {
+          items.push({
+            id: c.id,
+            kind: 'consumable',
+            name: c.name,
+            remaining: c.remaining_qty,
+            minQty,
+            page: 'consumables',
+          });
+        }
+      }
+    }
+
+    return items.sort((a, b) => a.remaining - b.remaining || a.name.localeCompare(b.name, 'tr'));
+  }, [accessories, consumables, canSeeAccessories, canSeeConsumables]);
+
+  const showCriticalPanel = canSeeAccessories || canSeeConsumables;
 
   const stats: {
     label: string;
@@ -110,6 +159,101 @@ export default function Dashboard({ assets, users, locations, categories, access
           );
         })}
       </div>
+
+      {showCriticalPanel ? (
+        <div
+          className={`mb-6 rounded-xl border p-4 sm:p-5 ${
+            criticalStock.length > 0
+              ? 'bg-red-50/80 border-red-200'
+              : 'bg-white border-gray-200'
+          }`}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-3">
+            <div className="flex items-start gap-3 min-w-0">
+              <div
+                className={`flex items-center justify-center w-10 h-10 rounded-lg shrink-0 ${
+                  criticalStock.length > 0 ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'
+                }`}
+              >
+                {criticalStock.length > 0 ? (
+                  <AlertTriangle className="w-5 h-5" />
+                ) : (
+                  <CheckCircle2 className="w-5 h-5" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-gray-900">{t('dashboardCriticalStock')}</h3>
+                <p className="text-xs text-gray-500 mt-0.5">{t('dashboardCriticalStockDesc')}</p>
+              </div>
+            </div>
+            {criticalStock.length > 0 ? (
+              <span className="inline-flex self-start items-center rounded-lg bg-red-100 text-red-800 text-xs font-semibold px-2.5 py-1">
+                {t('stockAlertCriticalCount', { count: criticalStock.length })}
+              </span>
+            ) : null}
+          </div>
+
+          {criticalStock.length === 0 ? (
+            <p className="text-sm text-gray-500 pl-0 sm:pl-[3.25rem]">{t('dashboardCriticalStockOk')}</p>
+          ) : (
+            <ul className="space-y-2 sm:pl-[3.25rem]">
+              {criticalStock.slice(0, 8).map((item) => (
+                <li key={`${item.kind}-${item.id}`}>
+                  <button
+                    type="button"
+                    onClick={() => navigate({ name: item.page })}
+                    className="w-full flex items-center gap-3 rounded-lg bg-white/90 border border-red-100 px-3 py-2.5 text-left hover:border-red-300 hover:shadow-sm transition-all"
+                  >
+                    <div className={`flex items-center justify-center w-8 h-8 rounded-lg shrink-0 ${
+                      item.kind === 'accessory' ? 'bg-cyan-50 text-cyan-700' : 'bg-orange-50 text-orange-700'
+                    }`}>
+                      {item.kind === 'accessory' ? <Package className="w-4 h-4" /> : <PackageCheck className="w-4 h-4" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {item.kind === 'accessory' ? t('accessory') : t('consumable')}
+                        <span className="mx-1 text-gray-300">·</span>
+                        {t('minThreshold')}: {item.minQty}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className={`text-sm font-bold ${item.remaining <= 0 ? 'text-red-700' : 'text-amber-700'}`}>
+                        {t('remainingShort', { remaining: item.remaining })}
+                      </p>
+                      <p className="text-[11px] text-gray-400">{item.remaining <= 0 ? t('stockEmpty') : t('stockLow')}</p>
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-gray-300 shrink-0 hidden sm:block" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {criticalStock.length > 8 ? (
+            <div className="mt-3 flex flex-wrap gap-2 sm:pl-[3.25rem]">
+              {canSeeAccessories ? (
+                <button
+                  type="button"
+                  onClick={() => navigate({ name: 'accessories' })}
+                  className="text-sm text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1"
+                >
+                  {t('accessories')} <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              ) : null}
+              {canSeeConsumables ? (
+                <button
+                  type="button"
+                  onClick={() => navigate({ name: 'consumables' })}
+                  className="text-sm text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1"
+                >
+                  {t('consumables')} <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="mb-6">
         {/* Category distribution */}

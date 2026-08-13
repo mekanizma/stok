@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { type Session } from '@supabase/supabase-js';
 import { supabase, type Asset, type UserRecord, type Category, type Manufacturer, type Location, type Accessory, type Consumable, type License } from '@/lib/supabase';
 import { useI18n, type TranslationKey } from '@/lib/i18n';
-import { LayoutDashboard, Users, MapPin, Tags, Building2, Settings, Package, KeyRound, PackageCheck, ScrollText, Menu, X, Globe, ClipboardCheck, ArchiveRestore, LogOut, Monitor } from 'lucide-react';
+import { LayoutDashboard, Users, MapPin, Tags, Building2, Settings, Package, KeyRound, PackageCheck, ScrollText, Menu, X, Globe, ClipboardCheck, ArchiveRestore, LogOut, Monitor, QrCode } from 'lucide-react';
 import { Button, Input, Modal } from '@/components/ui';
 import {
   adminDisplayName,
@@ -23,10 +23,12 @@ import ActivityPage from '@/pages/Activity';
 import SettingsPage from '@/pages/Settings';
 import DeployedAssetsPage from '@/pages/DeployedAssets';
 import CheckedInAssetsPage from '@/pages/CheckedInAssets';
+import ScanAssetPage from '@/pages/ScanAsset';
 import LoginPage from '@/pages/Login';
 import ForcePasswordChange from '@/pages/ForcePasswordChange';
 import { getSessionRole, roleFromDb, canAccessPage, defaultPageForRole, canEditDeployedAssets, canManageZimmet, canManageUsers, canDeleteRecords, type AppRole } from '@/lib/roles';
 import { insertCheckoutHistory } from '@/lib/checkoutHistory';
+import { parseAppHash, pageToHash } from '@/lib/assetLinks';
 
 function profileFromSession(session: Session | null): AdminProfile {
   const user = session?.user;
@@ -56,7 +58,8 @@ export type Page =
   | { name: 'consumables' }
   | { name: 'licenses' }
   | { name: 'activity' }
-  | { name: 'settings' };
+  | { name: 'settings' }
+  | { name: 'scan' };
 
 interface NavItem {
   labelKey: TranslationKey;
@@ -67,6 +70,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { labelKey: 'dashboard', icon: LayoutDashboard, page: 'dashboard', group: 'overview' },
+  { labelKey: 'scanAsset', icon: QrCode, page: 'scan', group: 'overview' },
   { labelKey: 'deployedAssets', icon: ClipboardCheck, page: 'deployed-assets', group: 'inventory' },
   { labelKey: 'checkedInAssets', icon: ArchiveRestore, page: 'checked-in-assets', group: 'inventory' },
   { labelKey: 'assets', icon: Monitor, page: 'assets', group: 'inventory' },
@@ -208,7 +212,11 @@ export default function App() {
       const role = await resolveAppRole(data.session);
       if (!mounted) return;
       setAppRole(role);
-      if (data.session) setPage(defaultPageForRole(role));
+      if (data.session) {
+        const linked = parseAppHash(window.location.hash);
+        if (linked && canAccessPage(role, linked.name)) setPage(linked);
+        else setPage(defaultPageForRole(role));
+      }
       setAuthReady(true);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
@@ -219,7 +227,9 @@ export default function App() {
         setAppRole(role);
         setAuthReady(true);
         if (event === 'SIGNED_IN' && next) {
-          setPage(defaultPageForRole(role));
+          const linked = parseAppHash(window.location.hash);
+          if (linked && canAccessPage(role, linked.name)) setPage(linked);
+          else setPage(defaultPageForRole(role));
         }
         if (event === 'SIGNED_OUT') {
           setPage({ name: 'dashboard' });
@@ -235,7 +245,9 @@ export default function App() {
   useEffect(() => {
     if (!session) return;
     if (!canAccessPage(appRole, page.name)) {
-      setPage(defaultPageForRole(appRole));
+      const linked = parseAppHash(window.location.hash);
+      if (linked && canAccessPage(appRole, linked.name)) setPage(linked);
+      else setPage(defaultPageForRole(appRole));
     }
   }, [session, appRole, page.name]);
 
@@ -255,7 +267,30 @@ export default function App() {
     if (!canAccessPage(appRole, p.name)) return;
     setPage(p);
     setSidebarOpen(false);
+    const nextHash = pageToHash(p);
+    if (window.location.hash !== nextHash) {
+      window.history.replaceState(null, '', nextHash);
+    }
   };
+
+  useEffect(() => {
+    const applyHash = () => {
+      const linked = parseAppHash(window.location.hash);
+      if (!linked) return;
+      if (!canAccessPage(appRole, linked.name)) return;
+      setPage((prev) => {
+        if (linked.name === 'asset-detail') {
+          if (prev.name === 'asset-detail' && prev.id === linked.id) return prev;
+          return linked;
+        }
+        if (prev.name === linked.name) return prev;
+        return linked;
+      });
+    };
+    applyHash();
+    window.addEventListener('hashchange', applyHash);
+    return () => window.removeEventListener('hashchange', applyHash);
+  }, [appRole, session]);
 
   const openProfile = () => {
     const current = profileFromSession(session);
@@ -406,6 +441,8 @@ export default function App() {
         );
       case 'checked-in-assets':
         return <CheckedInAssetsPage assets={assets} loading={loading} canDelete={canDeleteRecords(appRole)} navigate={navigate} onRefresh={() => { fetchAssets(); fetchUsers(); }} />;
+      case 'scan':
+        return <ScanAssetPage navigate={navigate} />;
       case 'asset-detail':
         return <AssetDetail assetId={page.id} navigate={navigate} onRefresh={fetchAssets} locations={locations} canManage={canManageZimmet(appRole)} canDelete={canDeleteRecords(appRole)} />;
       case 'users':

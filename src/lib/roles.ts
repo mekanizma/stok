@@ -14,14 +14,15 @@ export type AppPageName =
   | 'consumables'
   | 'licenses'
   | 'activity'
-  | 'settings';
+  | 'settings'
+  | 'scan';
 
 export const ASSIGNABLE_ROLES: AppRole[] = ['admin', 'hr', 'it'];
 
 /** @deprecated use ASSIGNABLE_ROLES */
 export const STAFF_ROLES: AppRole[] = ASSIGNABLE_ROLES;
 
-const HR_PAGES: AppPageName[] = ['deployed-assets', 'checked-in-assets', 'asset-detail'];
+const HR_PAGES: AppPageName[] = ['deployed-assets', 'checked-in-assets', 'asset-detail', 'scan'];
 
 /** Pages IT cannot open (admin-only people/places). */
 const IT_BLOCKED_PAGES: AppPageName[] = ['users', 'locations'];
