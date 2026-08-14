@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { type Asset, type Category, type Manufacturer, type Location } from '@/lib/supabase';
+import { type Asset, type Category, type CheckoutHistory, type Manufacturer, type Location } from '@/lib/supabase';
 import { supabase } from '@/lib/supabase';
 import { Plus, Search, Boxes, Trash2, Edit3, Monitor, CheckCircle2, ClipboardCheck } from 'lucide-react';
 import { Button, Modal, Input, Select, Textarea, PageHeader, EmptyState, ConfirmDialog, TablePagination } from '@/components/ui';
+import { IssueMeta, IssueStockModal } from '@/components/IssueStock';
 import { useI18n } from '@/lib/i18n';
 import { getAssetInventoryName } from '@/lib/assetAssignee';
-import { insertCheckoutHistory } from '@/lib/checkoutHistory';
-import { repairTurkishName } from '@/lib/turkishNames';
+import { assetStock, fetchStockIssues, issueAssetStock } from '@/lib/stockIssue';
+import { createdByStamp, inventoryCreatorName } from '@/lib/createdBy';
 
 interface Props {
   assets: Asset[];
@@ -16,6 +17,15 @@ interface Props {
   locations: Location[];
   onRefresh: () => void;
   canDelete?: boolean;
+  addCode?: string;
+}
+
+function scanPrefill(code: string) {
+  const value = code.trim();
+  if (/^(AST|ACC|DEM)[-_]/i.test(value)) {
+    return { asset_tag: value, serial: '' };
+  }
+  return { asset_tag: '', serial: value };
 }
 
 export default function AssetsPage({
@@ -26,27 +36,49 @@ export default function AssetsPage({
   locations,
   onRefresh,
   canDelete = false,
+  addCode,
 }: Props) {
-  const { t, tn, lang } = useI18n();
+  const { t, tn } = useI18n();
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<Asset | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Asset | null>(null);
   const [issueTarget, setIssueTarget] = useState<Asset | null>(null);
-  const [issuePerson, setIssuePerson] = useState('');
-  const [issueLocationId, setIssueLocationId] = useState('');
-  const [issueNote, setIssueNote] = useState('');
+  const [issues, setIssues] = useState<CheckoutHistory[]>([]);
   const [issueError, setIssueError] = useState('');
   const [saving, setSaving] = useState(false);
   const [issuing, setIssuing] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [page, setPage] = useState(1);
+  const [scanPrefillFields, setScanPrefillFields] = useState<{ asset_tag: string; serial: string } | null>(null);
   const pageSize = 12;
+
+  useEffect(() => {
+    if (!addCode?.trim()) return;
+    setEditing(null);
+    setScanPrefillFields(scanPrefill(addCode));
+    setShowAdd(true);
+  }, [addCode]);
+
+  const loadIssues = async () => {
+    try {
+      setIssues(await fetchStockIssues('asset'));
+    } catch {
+      setIssues([]);
+    }
+  };
+
+  useEffect(() => {
+    void loadIssues();
+  }, []);
 
   const readyAssets = useMemo(
     () => assets.filter((a) => a.status === 'ready'),
     [assets],
   );
-  const deployedCount = assets.filter((a) => a.status === 'deployed').length;
+  const availableQty = readyAssets.reduce((s, a) => s + assetStock(a).remaining, 0);
+  const totalQty = assets.reduce((s, a) => s + assetStock(a).qty, 0);
+  const deployedQty = assets.filter((a) => a.status === 'deployed').reduce((s, a) => s + assetStock(a).qty, 0);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -57,7 +89,8 @@ export default function AssetsPage({
       (a.serial || '').toLowerCase().includes(q) ||
       (a.model || '').toLowerCase().includes(q) ||
       (a.manufacturer?.name || '').toLowerCase().includes(q) ||
-      tn(a.category?.name).toLowerCase().includes(q),
+      tn(a.category?.name).toLowerCase().includes(q) ||
+      (a.created_by_name || '').toLowerCase().includes(q),
     );
   }, [readyAssets, search, tn]);
 
@@ -72,78 +105,81 @@ export default function AssetsPage({
 
   const handleSave = async (data: Record<string, string>) => {
     setSaving(true);
-    if (editing) {
-      await supabase.from('assets').update({
-        name: data.name,
-        serial: data.serial || null,
-        model: data.model || null,
-        manufacturer_id: data.manufacturer_id || null,
-        category_id: data.category_id || null,
-        default_location_id: data.default_location_id || null,
-        notes: data.notes || null,
-      }).eq('id', editing.id);
-    } else {
-      const tag = data.asset_tag?.trim() || `AST-${Date.now().toString(36).toUpperCase()}`;
-      await supabase.from('assets').insert({
-        asset_tag: tag,
-        name: data.name.trim(),
-        serial: data.serial?.trim() || null,
-        model: data.model?.trim() || null,
-        manufacturer_id: data.manufacturer_id || null,
-        category_id: data.category_id || null,
-        default_location_id: data.default_location_id || null,
-        status: 'ready',
-        notes: data.notes?.trim() || null,
-      });
+    setSaveError('');
+    const qty = Math.max(1, Math.min(9999, parseInt(String(data.qty), 10) || 1));
+    try {
+      if (editing) {
+        const remaining = Math.min(qty, Math.max(0, parseInt(String(data.remaining_qty), 10) || 0));
+        const { error } = await supabase.from('assets').update({
+          name: data.name,
+          serial: data.serial || null,
+          model: data.model || null,
+          manufacturer_id: data.manufacturer_id || null,
+          category_id: data.category_id || null,
+          default_location_id: data.default_location_id || null,
+          notes: data.notes || null,
+          qty,
+          remaining_qty: remaining,
+        }).eq('id', editing.id);
+        if (error) throw error;
+      } else {
+        const tag = data.asset_tag?.trim() || `AST-${Date.now().toString(36).toUpperCase()}`;
+        const createdBy = await createdByStamp();
+        const row = {
+          asset_tag: tag,
+          name: data.name.trim(),
+          serial: data.serial?.trim() || null,
+          model: data.model?.trim() || null,
+          manufacturer_id: data.manufacturer_id || null,
+          category_id: data.category_id || null,
+          default_location_id: data.default_location_id || null,
+          status: 'ready',
+          notes: data.notes?.trim() || null,
+          qty,
+          remaining_qty: qty,
+          min_qty: 1,
+          ...createdBy,
+        };
+        const { error } = await supabase.from('assets').insert(row);
+        if (error && /created_by_/i.test(error.message)) {
+          const { created_by_name: _n, created_by_email: _e, ...legacy } = row;
+          const { error: retryErr } = await supabase.from('assets').insert(legacy);
+          if (retryErr) throw retryErr;
+        } else if (error) {
+          throw error;
+        }
+      }
+      setShowAdd(false);
+      setEditing(null);
+      setScanPrefillFields(null);
+      onRefresh();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : t('saveFailed'));
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    setShowAdd(false);
-    setEditing(null);
-    onRefresh();
   };
 
-  const openIssue = (asset: Asset) => {
-    setIssueTarget(asset);
-    setIssuePerson('');
-    setIssueLocationId('');
-    setIssueNote('');
-    setIssueError('');
-  };
-
-  const handleIssue = async () => {
+  const handleIssue = async (opts: { qty: number; givenTo: string; assignedToId: string | null; note: string }) => {
     if (!issueTarget) return;
-    const person = issuePerson.trim();
-    if (!person) {
-      setIssueError(t('givenToRequired'));
-      return;
-    }
     setIssuing(true);
     setIssueError('');
     try {
-      const locationName = locations.find((l) => l.id === issueLocationId)?.name || '';
-      const givenTo = [locationName, person].filter(Boolean).join(' — ');
-      const { error: updErr } = await supabase.from('assets').update({
-        status: 'deployed',
-        assigned_to_id: null,
-        assignee_name: givenTo,
-        assignee_email: null,
-      }).eq('id', issueTarget.id);
-      if (updErr) throw updErr;
-
-      const noteParts = [t('checkedOutFromAssets'), issueNote.trim()].filter(Boolean);
-      const { error: histErr } = await insertCheckoutHistory({
-        asset_id: issueTarget.id,
-        action: 'checkout',
-        qty: 1,
-        given_to: givenTo,
-        note: noteParts.join(' — ') || null,
+      await issueAssetStock({
+        asset: issueTarget,
+        qty: opts.qty,
+        givenTo: opts.givenTo,
+        assignedToId: opts.assignedToId,
+        note: opts.note,
       });
-      if (histErr) throw histErr;
-
       setIssueTarget(null);
       onRefresh();
+      await loadIssues();
     } catch (e) {
-      setIssueError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === 'not_enough_stock') setIssueError(t('notEnoughStock'));
+      else if (msg === 'given_to_required') setIssueError(t('givenToRequired'));
+      else setIssueError(msg);
     } finally {
       setIssuing(false);
     }
@@ -169,14 +205,12 @@ export default function AssetsPage({
     );
   }
 
-  const locale = lang === 'tr' ? 'tr-TR' : 'en-US';
-
   return (
     <div className="p-4 lg:p-6 max-w-7xl mx-auto">
       <PageHeader
         title={t('assets')}
         description={t('assetsInventoryDesc')}
-        action={<Button onClick={() => { setEditing(null); setShowAdd(true); }}><Plus className="w-4 h-4" /> {t('addAsset')}</Button>}
+        action={<Button onClick={() => { setEditing(null); setScanPrefillFields(null); setShowAdd(true); }}><Plus className="w-4 h-4" /> {t('addAsset')}</Button>}
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-5">
@@ -185,21 +219,21 @@ export default function AssetsPage({
             <Boxes className="w-4 h-4" />
             <span className="text-xs font-medium uppercase tracking-wide text-gray-500">{t('available')}</span>
           </div>
-          <p className="text-2xl font-bold text-gray-900">{readyAssets.length}</p>
+          <p className="text-2xl font-bold text-gray-900">{availableQty}</p>
         </div>
         <div className="bg-white rounded-2xl border border-gray-200 p-4">
           <div className="flex items-center gap-2 text-emerald-600 mb-2">
             <CheckCircle2 className="w-4 h-4" />
             <span className="text-xs font-medium uppercase tracking-wide text-gray-500">{t('items')}</span>
           </div>
-          <p className="text-2xl font-bold text-gray-900">{assets.length}</p>
+          <p className="text-2xl font-bold text-gray-900">{totalQty}</p>
         </div>
         <div className="bg-white rounded-2xl border border-gray-200 p-4 col-span-2 lg:col-span-1">
           <div className="flex items-center gap-2 text-amber-600 mb-2">
             <ClipboardCheck className="w-4 h-4" />
             <span className="text-xs font-medium uppercase tracking-wide text-gray-500">{t('deployed')}</span>
           </div>
-          <p className="text-2xl font-bold text-gray-900">{deployedCount}</p>
+          <p className="text-2xl font-bold text-gray-900">{deployedQty}</p>
         </div>
       </div>
 
@@ -219,7 +253,7 @@ export default function AssetsPage({
           icon={Monitor}
           title={t('noAssetsYet')}
           description={t('addFirstAsset')}
-          action={<Button onClick={() => setShowAdd(true)}><Plus className="w-4 h-4" /> {t('addAsset')}</Button>}
+          action={<Button onClick={() => { setScanPrefillFields(null); setShowAdd(true); }}><Plus className="w-4 h-4" /> {t('addAsset')}</Button>}
         />
       ) : filtered.length === 0 ? (
         <EmptyState icon={Search} title={t('noResults')} description={t('adjustFilters')} />
@@ -263,15 +297,28 @@ export default function AssetsPage({
                       <span className="text-gray-400">{t('assetTag')}: </span>
                       <span className="font-mono text-gray-700">{a.asset_tag}</span>
                     </p>
+                    <p className="text-[11px] text-gray-600 truncate" title={a.created_by_email || undefined}>
+                      <span className="text-gray-400">{t('addedBy')}: </span>
+                      <span className="font-medium text-gray-800">{inventoryCreatorName(a.created_by_name)}</span>
+                    </p>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-1">
+                    <div className="rounded-lg bg-slate-50 py-1.5 text-center">
+                      <p className="text-[9px] uppercase tracking-wide text-gray-400">{t('inStock')}</p>
+                      <p className="text-sm font-bold text-gray-900 leading-tight">{assetStock(a).remaining}</p>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 py-1.5 text-center">
+                      <p className="text-[9px] uppercase tracking-wide text-gray-400">{t('quantity')}</p>
+                      <p className="text-sm font-bold text-gray-900 leading-tight">{assetStock(a).qty}</p>
+                    </div>
                   </div>
                   <div className="mt-auto pt-2">
-                    <button
-                      type="button"
-                      onClick={() => openIssue(a)}
-                      className="w-full h-8 rounded-lg text-xs font-medium bg-brand-600 text-white hover:bg-brand-700"
-                    >
-                      {t('issueStock')}
-                    </button>
+                    <IssueMeta
+                      itemName={getAssetInventoryName(a)}
+                      issues={issues.filter((h) => h.asset_id === a.id)}
+                      onIssue={() => { setIssueError(''); setIssueTarget(a); }}
+                      disabled={assetStock(a).remaining <= 0}
+                    />
                   </div>
                 </div>
               </div>
@@ -292,68 +339,33 @@ export default function AssetsPage({
 
       {showAdd && (
         <AssetForm
+          key={editing?.id || addCode || 'new'}
           asset={editing}
           categories={categories}
           manufacturers={manufacturers}
           locations={locations}
-          onClose={() => { setShowAdd(false); setEditing(null); }}
+          onClose={() => { setShowAdd(false); setEditing(null); setSaveError(''); setScanPrefillFields(null); }}
           onSave={handleSave}
           saving={saving}
+          saveError={saveError}
+          prefill={editing ? undefined : scanPrefillFields || undefined}
         />
       )}
 
-      <Modal
+      <IssueStockModal
         open={!!issueTarget}
-        onClose={() => setIssueTarget(null)}
-        title={t('issueStock')}
-        size="md"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setIssueTarget(null)} disabled={issuing}>{t('cancel')}</Button>
-            <Button onClick={handleIssue} disabled={issuing || !issuePerson.trim()} className="w-full sm:w-auto">
-              {issuing ? t('saving') : t('issueConfirm')}
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2.5">
-            <p className="text-sm font-semibold text-gray-900 truncate">{issueTarget ? getAssetInventoryName(issueTarget) : ''}</p>
-            <p className="text-xs text-gray-500 mt-0.5 font-mono">{issueTarget?.serial || '—'}</p>
-            <p className="text-xs text-gray-400 mt-1">{t('issueGoesToDeployed')}</p>
-          </div>
-          <Select
-            label={t('issueLocation')}
-            value={issueLocationId}
-            onChange={(e) => setIssueLocationId(e.target.value)}
-          >
-            <option value="">{t('selectOptional')}</option>
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>{tn(l.name)}</option>
-            ))}
-          </Select>
-          <Input
-            label={`${t('issuePerson')} *`}
-            value={issuePerson}
-            onChange={(e) => setIssuePerson(e.target.value)}
-            placeholder={t('issuePersonPlaceholder')}
-            autoComplete="name"
-          />
-          <Textarea
-            label={t('notes')}
-            rows={2}
-            value={issueNote}
-            onChange={(e) => setIssueNote(e.target.value)}
-            placeholder={t('issueNotePlaceholder')}
-          />
-          {issueError ? <p className="text-sm text-red-600">{issueError}</p> : null}
-          {issuePerson.trim() ? (
-            <p className="text-xs text-gray-500">
-              {t('issuedAt')}: {new Date().toLocaleString(locale)} → {repairTurkishName([locations.find((l) => l.id === issueLocationId)?.name, issuePerson.trim()].filter(Boolean).join(' — '))}
-            </p>
-          ) : null}
-        </div>
-      </Modal>
+        kind="asset"
+        itemId={issueTarget?.id || ''}
+        itemName={issueTarget ? getAssetInventoryName(issueTarget) : ''}
+        remaining={issueTarget ? assetStock(issueTarget).remaining : 0}
+        users={[]}
+        locations={locations}
+        history={issues}
+        saving={issuing}
+        error={issueError}
+        onClose={() => { if (!issuing) setIssueTarget(null); }}
+        onIssue={handleIssue}
+      />
 
       <ConfirmDialog
         open={canDelete && !!deleteTarget}
@@ -366,7 +378,7 @@ export default function AssetsPage({
   );
 }
 
-function AssetForm({ asset, categories, manufacturers, locations, onClose, onSave, saving }: {
+function AssetForm({ asset, categories, manufacturers, locations, onClose, onSave, saving, saveError, prefill }: {
   asset: Asset | null;
   categories: Category[];
   manufacturers: Manufacturer[];
@@ -374,18 +386,25 @@ function AssetForm({ asset, categories, manufacturers, locations, onClose, onSav
   onClose: () => void;
   onSave: (data: Record<string, string>) => void;
   saving: boolean;
+  saveError?: string;
+  prefill?: { asset_tag?: string; serial?: string };
 }) {
   const { t, tn } = useI18n();
   const [form, setForm] = useState({
     name: asset?.name || '',
-    asset_tag: asset?.asset_tag || '',
-    serial: asset?.serial || '',
+    asset_tag: asset?.asset_tag || prefill?.asset_tag || '',
+    serial: asset?.serial || prefill?.serial || '',
     model: asset?.model || '',
     manufacturer_id: asset?.manufacturer_id || '',
     category_id: asset?.category_id || '',
     default_location_id: asset?.default_location_id || '',
     notes: asset?.notes || '',
+    qty: asset ? String(asset.qty ?? 1) : '1',
+    remaining_qty: asset ? String(asset.remaining_qty ?? 1) : '1',
   });
+
+  const qtyNum = Math.max(1, parseInt(form.qty, 10) || 1);
+  const serialRequired = !asset && qtyNum <= 1;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -400,16 +419,28 @@ function AssetForm({ asset, categories, manufacturers, locations, onClose, onSav
       size="lg"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>{t('cancel')}</Button>
-          <Button onClick={handleSubmit} disabled={saving || !form.name.trim()}>{saving ? t('saving') : t('save')}</Button>
+          <Button variant="secondary" onClick={onClose} className="w-full sm:w-auto">{t('cancel')}</Button>
+          <Button onClick={handleSubmit} disabled={saving || !form.name.trim()} className="w-full sm:w-auto">{saving ? t('saving') : t('save')}</Button>
         </>
       }
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Input label={`${t('name')} *`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t('placeholderAssetName')} required />
+          <Input
+            label={`${t('quantity')} *`}
+            type="number"
+            min="1"
+            max="9999"
+            inputMode="numeric"
+            value={form.qty}
+            onChange={(e) => setForm({ ...form, qty: e.target.value })}
+          />
           {!asset && <Input label={t('assetTag')} value={form.asset_tag} onChange={(e) => setForm({ ...form, asset_tag: e.target.value })} placeholder={t('autoGenerated')} />}
-          <Input label={`${t('serial')} *`} value={form.serial} onChange={(e) => setForm({ ...form, serial: e.target.value })} placeholder="SN…" required={!asset} />
+          <Input label={serialRequired ? `${t('serial')} *` : t('serial')} value={form.serial} onChange={(e) => setForm({ ...form, serial: e.target.value })} placeholder="SN…" required={serialRequired} />
+          {!asset && (prefill?.serial || prefill?.asset_tag) ? (
+            <p className="sm:col-span-2 text-xs text-brand-700 -mt-2">{t('scanFilledFromCode')}</p>
+          ) : null}
           <Input label={t('model')} value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} placeholder="Laptop / Desktop…" />
           <Select label={t('category')} value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
             <option value="">{t('none')}</option>
@@ -423,8 +454,20 @@ function AssetForm({ asset, categories, manufacturers, locations, onClose, onSav
             <option value="">{t('none')}</option>
             {locations.map((l) => <option key={l.id} value={l.id}>{tn(l.name)}</option>)}
           </Select>
+          {asset ? (
+            <Input
+              label={t('remaining')}
+              type="number"
+              min="0"
+              inputMode="numeric"
+              value={form.remaining_qty}
+              onChange={(e) => setForm({ ...form, remaining_qty: e.target.value })}
+            />
+          ) : null}
         </div>
+        <p className="text-xs text-gray-500 -mt-2">{t('addAssetQtyHint')}</p>
         <Textarea label={t('notes')} rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+        {saveError ? <p className="text-sm text-red-600">{saveError}</p> : null}
       </form>
     </Modal>
   );

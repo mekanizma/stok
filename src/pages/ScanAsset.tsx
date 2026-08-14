@@ -1,16 +1,33 @@
 import { useEffect, useRef, useState } from 'react';
 import { Search, QrCode, Camera, Keyboard } from 'lucide-react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { supabase, type Asset } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { type Page } from '@/App';
 import { Button, Input, PageHeader } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 
 interface Props {
   navigate: (p: Page) => void;
+  canAdd?: boolean;
 }
 
 const SCANNER_REGION_ID = 'asset-qr-reader';
+
+const BARCODE_FORMATS = [
+  Html5QrcodeSupportedFormats.QR_CODE,
+  Html5QrcodeSupportedFormats.DATA_MATRIX,
+  Html5QrcodeSupportedFormats.AZTEC,
+  Html5QrcodeSupportedFormats.PDF_417,
+  Html5QrcodeSupportedFormats.CODE_128,
+  Html5QrcodeSupportedFormats.CODE_39,
+  Html5QrcodeSupportedFormats.CODE_93,
+  Html5QrcodeSupportedFormats.CODABAR,
+  Html5QrcodeSupportedFormats.ITF,
+  Html5QrcodeSupportedFormats.EAN_13,
+  Html5QrcodeSupportedFormats.EAN_8,
+  Html5QrcodeSupportedFormats.UPC_A,
+  Html5QrcodeSupportedFormats.UPC_E,
+];
 
 function extractAssetId(raw: string): string | null {
   const text = raw.trim();
@@ -29,7 +46,29 @@ function extractAssetId(raw: string): string | null {
   return null;
 }
 
-export default function ScanAssetPage({ navigate }: Props) {
+function likeExact(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+async function findAssetId(value: string): Promise<string | null> {
+  const byId = extractAssetId(value);
+  if (byId) {
+    const { data } = await supabase.from('assets').select('id').eq('id', byId).limit(1);
+    if (data?.[0]?.id) return data[0].id;
+  }
+
+  const variants = Array.from(new Set([value, value.toUpperCase(), value.replace(/^0+/, '') || value]));
+  for (const v of variants) {
+    const exact = likeExact(v);
+    const { data: byTag } = await supabase.from('assets').select('id').ilike('asset_tag', exact).limit(1);
+    if (byTag?.[0]?.id) return byTag[0].id;
+    const { data: bySerial } = await supabase.from('assets').select('id').ilike('serial', exact).limit(1);
+    if (bySerial?.[0]?.id) return bySerial[0].id;
+  }
+  return null;
+}
+
+export default function ScanAssetPage({ navigate, canAdd = false }: Props) {
   const { t } = useI18n();
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
@@ -40,55 +79,25 @@ export default function ScanAssetPage({ navigate }: Props) {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const handlingRef = useRef(false);
 
-  const openAsset = (asset: Asset) => {
-    navigate({ name: 'asset-detail', id: asset.id });
-  };
-
   const resolveCode = async (raw: string) => {
     const value = raw.trim();
     if (!value) {
       setError(t('scanEnterCode'));
       return;
     }
+    setQuery(value);
     setSearching(true);
     setError('');
     try {
-      const byId = extractAssetId(value);
-      if (byId) {
-        const { data } = await supabase
-          .from('assets')
-          .select('id, name, asset_tag, status')
-          .eq('id', byId)
-          .maybeSingle();
-        if (data) {
-          openAsset(data as Asset);
-          return;
-        }
-      }
-
-      const tag = value.toUpperCase();
-      const { data: byTag } = await supabase
-        .from('assets')
-        .select('id, name, asset_tag, status')
-        .ilike('asset_tag', tag)
-        .limit(1)
-        .maybeSingle();
-      if (byTag) {
-        openAsset(byTag as Asset);
+      const assetId = await findAssetId(value);
+      if (assetId) {
+        navigate({ name: 'asset-detail', id: assetId });
         return;
       }
-
-      const { data: bySerial } = await supabase
-        .from('assets')
-        .select('id, name, asset_tag, status')
-        .ilike('serial', value)
-        .limit(1)
-        .maybeSingle();
-      if (bySerial) {
-        openAsset(bySerial as Asset);
+      if (canAdd) {
+        navigate({ name: 'assets', addCode: value });
         return;
       }
-
       setError(t('assetNotFound'));
     } finally {
       setSearching(false);
@@ -130,7 +139,6 @@ export default function ScanAssetPage({ navigate }: Props) {
     setCameraOn(true);
     setCameraStarting(true);
 
-    // Let React mount #asset-qr-reader before Html5Qrcode attaches.
     await new Promise<void>((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     });
@@ -145,40 +153,52 @@ export default function ScanAssetPage({ navigate }: Props) {
 
     try {
       const scanner = new Html5Qrcode(SCANNER_REGION_ID, {
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.QR_CODE,
-          Html5QrcodeSupportedFormats.CODE_128,
-          Html5QrcodeSupportedFormats.CODE_39,
-          Html5QrcodeSupportedFormats.EAN_13,
-          Html5QrcodeSupportedFormats.EAN_8,
-          Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.UPC_E,
-        ],
+        formatsToSupport: BARCODE_FORMATS,
         verbose: false,
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true,
+        },
       });
       scannerRef.current = scanner;
 
-      const boxSize = Math.min(280, Math.max(180, Math.floor(window.innerWidth * 0.65)));
-      await scanner.start(
-        { facingMode: 'environment' },
-        {
-          fps: 12,
-          qrbox: { width: boxSize, height: boxSize },
-          aspectRatio: 1,
-          disableFlip: false,
+      const config = {
+        fps: 16,
+        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+          const width = Math.max(220, Math.floor(Math.min(viewfinderWidth * 0.92, 420)));
+          const height = Math.max(110, Math.floor(Math.min(viewfinderHeight * 0.38, width * 0.48)));
+          return { width, height };
         },
-        (decodedText) => {
-          if (handlingRef.current) return;
-          handlingRef.current = true;
-          void (async () => {
-            await stopCamera();
-            await resolveCode(decodedText);
-          })();
+        aspectRatio: window.innerWidth < 640 ? 1.333 : 1.777,
+        disableFlip: false,
+        videoConstraints: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
         },
-        () => {
-          /* no code in this frame */
-        },
-      );
+      };
+
+      const onDecoded = (decodedText: string) => {
+        if (handlingRef.current) return;
+        handlingRef.current = true;
+        try {
+          navigator.vibrate?.(80);
+        } catch {
+          /* ignore */
+        }
+        void (async () => {
+          await stopCamera();
+          await resolveCode(decodedText);
+        })();
+      };
+
+      try {
+        await scanner.start({ facingMode: 'environment' }, config, onDecoded, () => undefined);
+      } catch {
+        const cams = await Html5Qrcode.getCameras();
+        const back = cams.find((c) => /back|rear|environment|arka|world/i.test(c.label)) || cams[0];
+        if (!back?.id) throw new Error('no camera');
+        await scanner.start(back.id, config, onDecoded, () => undefined);
+      }
       setCameraStarting(false);
     } catch (e) {
       await releaseScanner();
@@ -227,7 +247,7 @@ export default function ScanAssetPage({ navigate }: Props) {
             autoCapitalize="characters"
             inputMode="text"
           />
-          <Button type="submit" className="w-full" disabled={searching || !query.trim()}>
+          <Button type="submit" className="w-full min-h-11" disabled={searching || !query.trim()}>
             <Search className="w-4 h-4" />
             {searching ? t('checking') : t('scanOpenAsset')}
           </Button>
@@ -242,7 +262,7 @@ export default function ScanAssetPage({ navigate }: Props) {
             <Button
               type="button"
               variant="outline"
-              className="w-full"
+              className="w-full min-h-11"
               onClick={() => { void startCamera(); }}
               disabled={cameraStarting}
             >
@@ -250,15 +270,22 @@ export default function ScanAssetPage({ navigate }: Props) {
             </Button>
           ) : (
             <div className="space-y-2">
-              <div className="relative overflow-hidden rounded-xl bg-black min-h-[260px]">
-                <div id={SCANNER_REGION_ID} className="w-full [&_video]:w-full [&_video]:rounded-xl" />
+              <div className="relative overflow-hidden rounded-xl bg-black min-h-[280px] sm:min-h-[320px]">
+                <div
+                  id={SCANNER_REGION_ID}
+                  className="w-full [&_video]:w-full [&_video]:h-full [&_video]:object-cover [&_video]:rounded-xl [&_img]:w-full"
+                />
                 {cameraStarting ? (
                   <div className="absolute inset-0 flex items-center justify-center text-sm text-white/80">
                     {t('checking')}
                   </div>
-                ) : null}
+                ) : (
+                  <p className="pointer-events-none absolute bottom-3 left-3 right-3 text-center text-[11px] text-white/90 bg-black/45 rounded-lg px-2 py-1.5">
+                    {t('scanCameraAlign')}
+                  </p>
+                )}
               </div>
-              <Button type="button" variant="secondary" className="w-full" onClick={() => { void stopCamera(); }}>
+              <Button type="button" variant="secondary" className="w-full min-h-11" onClick={() => { void stopCamera(); }}>
                 {t('scanStopCamera')}
               </Button>
             </div>

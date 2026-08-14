@@ -69,6 +69,9 @@ export interface Asset {
   assignee_name: string | null;
   assignee_email: string | null;
   status: AssetStatus;
+  qty: number;
+  remaining_qty: number;
+  min_qty: number;
   purchase_date: string | null;
   purchase_cost: number | null;
   order_number: string | null;
@@ -76,6 +79,8 @@ export interface Asset {
   warranty_months: number | null;
   notes: string | null;
   image_url: string | null;
+  created_by_name?: string | null;
+  created_by_email?: string | null;
   created_at: string;
   updated_at: string;
   manufacturer?: Manufacturer | null;
@@ -110,6 +115,8 @@ export interface Consumable {
   qty: number;
   remaining_qty: number;
   min_qty: number;
+  created_by_name?: string | null;
+  created_by_email?: string | null;
   created_at: string;
   manufacturer?: Manufacturer | null;
   category?: Category | null;

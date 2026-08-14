@@ -53,7 +53,7 @@ export type Page =
   | { name: 'locations' }
   | { name: 'categories' }
   | { name: 'manufacturers' }
-  | { name: 'assets' }
+  | { name: 'assets'; addCode?: string }
   | { name: 'accessories' }
   | { name: 'consumables' }
   | { name: 'licenses' }
@@ -393,6 +393,7 @@ export default function App() {
       assignee_name: null,
       assignee_email: null,
       status: 'ready',
+      remaining_qty: Math.max(1, Number(asset.qty) || 1),
       default_location_id: locationId || null,
     }).eq('id', asset.id);
     fetchAssets();
@@ -442,7 +443,7 @@ export default function App() {
       case 'checked-in-assets':
         return <CheckedInAssetsPage assets={assets} loading={loading} canDelete={canDeleteRecords(appRole)} navigate={navigate} onRefresh={() => { fetchAssets(); fetchUsers(); }} />;
       case 'scan':
-        return <ScanAssetPage navigate={navigate} />;
+        return <ScanAssetPage navigate={navigate} canAdd={canAccessPage(appRole, 'assets')} />;
       case 'asset-detail':
         return <AssetDetail assetId={page.id} navigate={navigate} onRefresh={fetchAssets} locations={locations} canManage={canManageZimmet(appRole)} canDelete={canDeleteRecords(appRole)} />;
       case 'users':
@@ -463,6 +464,7 @@ export default function App() {
             locations={locations}
             onRefresh={fetchAssets}
             canDelete={canDeleteRecords(appRole)}
+            addCode={page.addCode}
           />
         );
       case 'accessories':

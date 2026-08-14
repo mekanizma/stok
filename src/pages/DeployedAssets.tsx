@@ -14,7 +14,8 @@ import {
 } from '@/lib/zimmetImport';
 import { repairTurkishName } from '@/lib/turkishNames';
 import { insertCheckoutHistory } from '@/lib/checkoutHistory';
-import { issueStock } from '@/lib/stockIssue';
+import { issueStock, assetStock } from '@/lib/stockIssue';
+import { createdByStamp } from '@/lib/createdBy';
 import { canonicalEntityName, registerEntityPair, categoryIdentityKey } from '@/lib/entityI18n';
 
 interface Props {
@@ -158,6 +159,7 @@ export default function DeployedAssetsPage({
     const assigneeEmail = (data.email || '').trim().toLowerCase();
     const assetName = repairTurkishName(data.name) || assigneeName;
 
+    const createdBy = await createdByStamp();
     const { data: createdAsset, error: assetError } = await supabase
       .from('assets')
       .insert({
@@ -172,7 +174,11 @@ export default function DeployedAssetsPage({
         assignee_name: assigneeName,
         assignee_email: assigneeEmail || null,
         status: 'deployed',
+        qty: 1,
+        remaining_qty: 0,
+        min_qty: 1,
         notes: data.notes?.trim() || null,
+        ...createdBy,
       })
       .select('id')
       .single();
@@ -198,10 +204,14 @@ export default function DeployedAssetsPage({
     const assigneeName = repairTurkishName(data.assignee_name) || t('unknownAssignee');
     const assigneeEmail = (data.email || '').trim().toLowerCase();
 
+    const source = assets.find((a) => a.id === assetId);
+    const issueQty = source ? assetStock(source).remaining : 1;
+
     const { error } = await supabase
       .from('assets')
       .update({
         status: 'deployed',
+        remaining_qty: 0,
         assigned_to_id: null,
         assignee_name: assigneeName,
         assignee_email: assigneeEmail || null,
@@ -217,7 +227,7 @@ export default function DeployedAssetsPage({
       asset_id: assetId,
       assigned_to_id: null,
       action: 'checkout',
-      qty: 1,
+      qty: Math.max(1, issueQty),
       given_to: assigneeName,
       note: `${t('checkedOutFromAssets')} — ${assigneeName}${assigneeEmail ? ` (${assigneeEmail})` : ''}`,
     });
@@ -556,6 +566,7 @@ export default function DeployedAssetsPage({
                           <p className="text-sm font-medium text-gray-900 group-hover:text-brand-600 transition-colors truncate">{getAssetDisplayName(a)}</p>
                           <p className="text-xs text-gray-500 truncate">
                             {[a.model, a.serial].filter(Boolean).join(' · ') || '—'}
+                            {assetStock(a).qty > 1 ? ` · ${assetStock(a).qty} ${t('pcs')}` : ''}
                           </p>
                           <span className="inline-flex mt-1 text-[11px] font-mono text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
                             {a.asset_tag}
@@ -925,7 +936,7 @@ function CheckoutForm({ asset, inventoryAssets = [], inventoryAccessories = [], 
                     const serial = a.serial || '—';
                     return (
                       <option key={`asset-${a.id}`} value={`asset:${a.id}`}>
-                        {getAssetDisplayName(a)} · {brand} · {a.model || '—'} · SN:{serial}
+                        {getAssetDisplayName(a)} · {brand} · {a.model || '—'} · SN:{serial} · {assetStock(a).remaining} {t('pcs')}
                       </option>
                     );
                   })}

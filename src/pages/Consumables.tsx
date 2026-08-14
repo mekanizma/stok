@@ -7,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { notifyCriticalStock } from '@/lib/stockAlerts';
 import { fetchStockIssues, issueStock } from '@/lib/stockIssue';
 import { InventoryFilterBar } from '@/components/InventoryFilterBar';
+import { createdByStamp, inventoryCreatorName } from '@/lib/createdBy';
 
 interface Props {
   consumables: Consumable[];
@@ -78,7 +79,8 @@ export default function ConsumablesPage({ consumables, categories, manufacturers
         tn(c.name).toLowerCase().includes(q) ||
         (c.manufacturer?.name || '').toLowerCase().includes(q) ||
         (c.category?.name || '').toLowerCase().includes(q) ||
-        tn(c.category?.name).toLowerCase().includes(q)
+        tn(c.category?.name).toLowerCase().includes(q) ||
+        (c.created_by_name || '').toLowerCase().includes(q)
       );
     });
   }, [consumables, search, categoryId, tn]);
@@ -104,10 +106,17 @@ export default function ConsumablesPage({ consumables, categories, manufacturers
         remaining_qty: remaining,
       }).eq('id', editing.id);
     } else {
-      await supabase.from('consumables').insert({
+      const createdBy = await createdByStamp();
+      const row = {
         name: data.name, manufacturer_id: data.manufacturer_id || null,
         category_id: data.category_id || null, qty, remaining_qty: qty, min_qty: minQty,
-      });
+        ...createdBy,
+      };
+      const { error } = await supabase.from('consumables').insert(row);
+      if (error && /created_by_/i.test(error.message)) {
+        const { created_by_name: _n, created_by_email: _e, ...legacy } = row;
+        await supabase.from('consumables').insert(legacy);
+      }
     }
     setSaving(false);
     setShowForm(false);
@@ -237,6 +246,12 @@ export default function ConsumablesPage({ consumables, categories, manufacturers
                       {tn(c.category?.name) || '—'}
                     </p>
                   </div>
+                  <p className="mt-1 text-[11px] text-gray-500 truncate" title={c.created_by_email || undefined}>
+                    <span className="text-gray-400">{t('addedBy')}: </span>
+                    <span className="font-medium text-gray-700">
+                      {inventoryCreatorName(c.created_by_name)}
+                    </span>
+                  </p>
                   <div className="mt-3 grid grid-cols-3 gap-1">
                     <div className="rounded-lg bg-slate-50 py-1.5 text-center">
                       <p className="text-[9px] uppercase tracking-wide text-gray-400">{t('remaining')}</p>

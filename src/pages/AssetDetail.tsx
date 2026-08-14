@@ -2,14 +2,16 @@ import { useState, useEffect } from 'react';
 import { supabase, type Asset, type Location, type CheckoutHistory } from '@/lib/supabase';
 import { ArrowLeft, Boxes, Tag, FileText, ArrowRightLeft, Edit3, Trash2, MapPin, User as UserIcon, Building2, Package, Printer, QrCode, Copy, Check } from 'lucide-react';
 import { type Page } from '@/App';
-import { StatusBadge, Button, Avatar, Modal, Select, Input, Textarea } from '@/components/ui';
+import { StatusBadge, Button, Avatar, Modal, Select } from '@/components/ui';
 import { useI18n, type TranslationKey } from '@/lib/i18n';
 import { getAssetTypeImage } from '@/lib/assetImages';
 import { getAssetAssignee, isAssetDeployed, getAssetDisplayName, getAssetInventoryName } from '@/lib/assetAssignee';
 import { insertCheckoutHistory } from '@/lib/checkoutHistory';
 import { assetDeepLink } from '@/lib/assetLinks';
 import { qrDataUrl } from '@/lib/qrCode';
-import { repairTurkishName } from '@/lib/turkishNames';
+import { IssueStockModal } from '@/components/IssueStock';
+import { assetStock, issueAssetStock } from '@/lib/stockIssue';
+import { inventoryCreatorName } from '@/lib/createdBy';
 
 interface Props {
   assetId: string;
@@ -29,9 +31,6 @@ export default function AssetDetail({ assetId, navigate, onRefresh, locations, c
   const [checkinLocationId, setCheckinLocationId] = useState('');
   const [checkingIn, setCheckingIn] = useState(false);
   const [showIssue, setShowIssue] = useState(false);
-  const [issuePerson, setIssuePerson] = useState('');
-  const [issueLocationId, setIssueLocationId] = useState('');
-  const [issueNote, setIssueNote] = useState('');
   const [issueError, setIssueError] = useState('');
   const [issuing, setIssuing] = useState(false);
   const [qrUrl, setQrUrl] = useState('');
@@ -89,6 +88,7 @@ export default function AssetDetail({ assetId, navigate, onRefresh, locations, c
         assignee_name: null,
         assignee_email: null,
         status: 'ready',
+        remaining_qty: Math.max(1, Number(asset.qty) || 1),
         default_location_id: checkinLocationId,
       }).eq('id', asset.id);
       setShowCheckin(false);
@@ -101,45 +101,27 @@ export default function AssetDetail({ assetId, navigate, onRefresh, locations, c
     }
   };
 
-  const handleIssue = async () => {
+  const handleIssue = async (opts: { qty: number; givenTo: string; assignedToId: string | null; note: string }) => {
     if (!canManage || !asset || isAssetDeployed(asset)) return;
-    const person = issuePerson.trim();
-    if (!person) {
-      setIssueError(t('givenToRequired'));
-      return;
-    }
     setIssuing(true);
     setIssueError('');
     try {
-      const locationName = locations.find((l) => l.id === issueLocationId)?.name || '';
-      const givenTo = repairTurkishName([locationName, person].filter(Boolean).join(' — '));
-      const { error: updErr } = await supabase.from('assets').update({
-        status: 'deployed',
-        assigned_to_id: null,
-        assignee_name: givenTo,
-        assignee_email: null,
-      }).eq('id', asset.id);
-      if (updErr) throw updErr;
-
-      const noteParts = [t('checkedOutFromAssets'), issueNote.trim()].filter(Boolean);
-      const { error: histErr } = await insertCheckoutHistory({
-        asset_id: asset.id,
-        action: 'checkout',
-        qty: 1,
-        given_to: givenTo,
-        note: noteParts.join(' — ') || null,
+      await issueAssetStock({
+        asset,
+        qty: opts.qty,
+        givenTo: opts.givenTo,
+        assignedToId: opts.assignedToId,
+        note: opts.note,
       });
-      if (histErr) throw histErr;
-
       setShowIssue(false);
-      setIssuePerson('');
-      setIssueLocationId('');
-      setIssueNote('');
       fetchAsset();
       fetchHistory();
       onRefresh();
     } catch (e) {
-      setIssueError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === 'not_enough_stock') setIssueError(t('notEnoughStock'));
+      else if (msg === 'given_to_required') setIssueError(t('givenToRequired'));
+      else setIssueError(msg);
     } finally {
       setIssuing(false);
     }
@@ -235,6 +217,7 @@ body{font-family:Segoe UI,Tahoma,sans-serif;background:#f1f5f9;color:#0f172a;pad
       [t('name'), getAssetDisplayName(asset)],
       [t('model'), asset.model || '—'],
       [t('serial'), asset.serial || '—'],
+      [t('quantity'), String(assetStock(asset).qty)],
       [t('manufacturer'), asset.manufacturer?.name || '—'],
       [t('category'), tn(asset.category?.name) || '—'],
       [t('defaultLocation'), tn(locName === '—' ? null : locName) || '—'],
@@ -331,10 +314,12 @@ ${hasAssignee ? `<div class="section"><h2>${t('assignedToInfo')}</h2><table clas
   const infoItems = [
     { icon: Tag, label: t('assetTag'), value: asset.asset_tag, mono: true },
     { icon: Package, label: t('serial'), value: asset.serial || '—', mono: true },
+    { icon: Boxes, label: t('quantity'), value: `${assetStock(asset).remaining} / ${assetStock(asset).qty}` },
     { icon: Boxes, label: t('model'), value: asset.model || '—' },
     { icon: Building2, label: t('manufacturer'), value: asset.manufacturer?.name || '—' },
     { icon: Tag, label: t('category'), value: tn(asset.category?.name) || '—' },
     { icon: MapPin, label: t('defaultLocation'), value: tn(asset.default_location?.name) || '—' },
+    { icon: UserIcon, label: t('addedBy'), value: inventoryCreatorName(asset.created_by_name) },
   ];
 
   const deployed = isAssetDeployed(asset);
@@ -408,9 +393,6 @@ ${hasAssignee ? `<div class="section"><h2>${t('assignedToInfo')}</h2><table clas
                   onClick={() => {
                     setShowIssue(true);
                     setIssueError('');
-                    setIssuePerson('');
-                    setIssueLocationId('');
-                    setIssueNote('');
                   }}
                 >
                   <ArrowRightLeft className="w-4 h-4" /> {t('quickIssue')}
@@ -517,52 +499,20 @@ ${hasAssignee ? `<div class="section"><h2>${t('assignedToInfo')}</h2><table clas
         </div>
       </div>
 
-      <Modal
+      <IssueStockModal
         open={canManage && showIssue}
+        kind="asset"
+        itemId={asset.id}
+        itemName={getAssetInventoryName(asset)}
+        remaining={assetStock(asset).remaining}
+        users={[]}
+        locations={locations}
+        history={history}
+        saving={issuing}
+        error={issueError}
         onClose={() => { if (!issuing) setShowIssue(false); }}
-        title={t('quickIssue')}
-        size="md"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setShowIssue(false)} disabled={issuing}>{t('cancel')}</Button>
-            <Button onClick={() => { void handleIssue(); }} disabled={issuing || !issuePerson.trim()} className="w-full sm:w-auto">
-              {issuing ? t('saving') : t('issueConfirm')}
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2.5">
-            <p className="text-sm font-semibold text-gray-900 truncate">{getAssetInventoryName(asset)}</p>
-            <p className="text-xs text-gray-500 mt-0.5 font-mono">{asset.asset_tag}</p>
-          </div>
-          <Select
-            label={t('issueLocation')}
-            value={issueLocationId}
-            onChange={(e) => setIssueLocationId(e.target.value)}
-          >
-            <option value="">{t('selectOptional')}</option>
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>{tn(l.name)}</option>
-            ))}
-          </Select>
-          <Input
-            label={`${t('issuePerson')} *`}
-            value={issuePerson}
-            onChange={(e) => setIssuePerson(e.target.value)}
-            placeholder={t('issuePersonPlaceholder')}
-            autoComplete="name"
-          />
-          <Textarea
-            label={t('notes')}
-            rows={2}
-            value={issueNote}
-            onChange={(e) => setIssueNote(e.target.value)}
-            placeholder={t('issueNotePlaceholder')}
-          />
-          {issueError ? <p className="text-sm text-red-600">{issueError}</p> : null}
-        </div>
-      </Modal>
+        onIssue={handleIssue}
+      />
 
       <Modal
         open={canManage && showCheckin}

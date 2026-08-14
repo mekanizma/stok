@@ -6,19 +6,8 @@ import { IssueMeta, IssueStockModal } from '@/components/IssueStock';
 import { useI18n, type TranslationKey } from '@/lib/i18n';
 import { notifyCriticalStock } from '@/lib/stockAlerts';
 import { fetchStockIssues, issueStock } from '@/lib/stockIssue';
-import { getCurrentActor } from '@/lib/checkoutHistory';
-import { repairTurkishName } from '@/lib/turkishNames';
 import { InventoryFilterBar } from '@/components/InventoryFilterBar';
-
-const DEFAULT_ACCESSORY_CREATOR = 'Bilal Ugurel';
-
-function accessoryCreatorName(name: string | null | undefined) {
-  const trimmed = (name || '').trim();
-  if (!trimmed) return DEFAULT_ACCESSORY_CREATOR;
-  const lower = trimmed.toLocaleLowerCase('tr-TR');
-  if (lower === 'sistem' || lower === 'system') return DEFAULT_ACCESSORY_CREATOR;
-  return repairTurkishName(trimmed);
-}
+import { createdByStamp, inventoryCreatorName } from '@/lib/createdBy';
 
 interface Props {
   accessories: Accessory[];
@@ -123,7 +112,7 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
         remaining_qty: remaining,
       }).eq('id', editing.id);
     } else {
-      const actor = await getCurrentActor();
+      const actor = await createdByStamp();
       const row = {
         name: data.name,
         serial: data.serial?.trim() || null,
@@ -131,8 +120,7 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
         category_id: data.category_id || null,
         location_id: data.location_id || null,
         qty, remaining_qty: qty, min_qty: minQty,
-        created_by_name: actor.name ? repairTurkishName(actor.name) : DEFAULT_ACCESSORY_CREATOR,
-        created_by_email: actor.email,
+        ...actor,
       };
       const { error } = await supabase.from('accessories').insert(row);
       if (error && /created_by_/i.test(error.message)) {
@@ -290,7 +278,7 @@ export default function AccessoriesPage({ accessories, categories, manufacturers
                   <p className="mt-1 text-[11px] text-gray-500 truncate" title={a.created_by_email || undefined}>
                     <span className="text-gray-400">{t('addedBy')}: </span>
                     <span className="font-medium text-gray-700">
-                      {accessoryCreatorName(a.created_by_name)}
+                      {inventoryCreatorName(a.created_by_name)}
                     </span>
                   </p>
                   <div className="mt-3 grid grid-cols-3 gap-1">

@@ -193,7 +193,11 @@ export function IssueStockModal({
 
         <div>
           <p className="text-sm font-medium text-gray-800 mb-2">{t('issueHistory')}</p>
-          <IssueHistoryLines issues={history.filter((h) => (kind === 'accessory' ? h.accessory_id : h.consumable_id) === itemId)} limit={8} />
+          <IssueHistoryLines issues={history.filter((h) => {
+            if (kind === 'accessory') return h.accessory_id === itemId;
+            if (kind === 'consumable') return h.consumable_id === itemId;
+            return h.asset_id === itemId;
+          })} limit={8} />
         </div>
       </div>
     </Modal>

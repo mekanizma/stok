@@ -35,8 +35,9 @@ export default function Dashboard({ assets, users, locations, categories, access
     })();
   }, []);
 
-  const ready = assets.filter((a) => a.status === 'ready').length;
-  const deployed = assets.filter((a) => a.status === 'deployed').length;
+  const ready = assets.filter((a) => a.status === 'ready').reduce((s, a) => s + Math.max(0, Number(a.remaining_qty ?? a.qty) || 1), 0);
+  const deployed = assets.filter((a) => a.status === 'deployed').reduce((s, a) => s + Math.max(1, Number(a.qty) || 1), 0);
+  const totalAssetQty = assets.reduce((s, a) => s + Math.max(1, Number(a.qty) || 1), 0);
 
   const canSeeAccessories = canAccessPage(appRole, 'accessories');
   const canSeeConsumables = canAccessPage(appRole, 'consumables');
@@ -94,7 +95,7 @@ export default function Dashboard({ assets, users, locations, categories, access
     iconBg: string;
     page: Page['name'];
   }[] = [
-    { label: t('totalAssets'), value: assets.length, icon: Boxes, iconBg: 'bg-brand-600', page: 'categories' },
+    { label: t('totalAssets'), value: totalAssetQty, icon: Boxes, iconBg: 'bg-brand-600', page: 'categories' },
     { label: t('readyToDeploy'), value: ready, icon: CheckCircle2, iconBg: 'bg-emerald-600', page: 'checked-in-assets' },
     { label: t('deployed'), value: deployed, icon: TrendingUp, iconBg: 'bg-blue-600', page: 'deployed-assets' },
   ];
